@@ -1,0 +1,128 @@
+# AI CODING RULES (MANDATORY)
+
+## HARD CONSTRAINTS
+
+### Project Structure
+- **NEVER** create nested subdirectories without explicit approval
+- Keep flat, simple structure: root scripts, `data/`, `backtest/` folders
+- Data files go in `data/` directory with clear naming: `{asset}_{timeframe}_data_{date_range}.csv`
+- All executable scripts stay in root directory for easy access
+- **NO** unnecessary folder hierarchies like `src/`, `lib/`, `utils/` unless explicitly requested
+
+### Code Style & Philosophy
+- **SIMPLICITY OVER COMPLEXITY**: If a feature isn't needed, remove it entirely
+- Write clear, self-documenting code with descriptive variable names
+- Use docstrings for all functions with Args section
+- Comments should explain "why", not "what" (code should be self-explanatory)
+- **NO EMOJIS** in code or comments unless explicitly requested
+- Prefer functional programming style where appropriate
+
+### Python Specific
+- Use Python 3 (`python3` command, not `python`)
+- Virtual environment is `.venv` - always activate before running scripts
+- Import order: standard library → third-party → local modules
+- Use f-strings for string formatting
+- Use pathlib for file paths, not string concatenation
+- Type hints are optional but encouraged for function signatures
+
+### Dependencies & Libraries
+- **Data handling**: pandas, numpy
+- **Visualization**: Plotly (preferred for interactive charts), matplotlib (for static)
+- **Trading data format**: Binance CSV format (columns: Open time, Open, High, Low, Close, Volume, Close time, etc.)
+- Install packages only when needed - don't preemptively add dependencies
+
+### Data & Trading
+- All crypto price data is from **Binance** (BTCUSDT)
+- Timeframes available: 15m, 1h, 4h, 1d
+- Always standardize column names: `.str.strip().str.lower()`
+- Handle both 'open time' and 'timestamp' column names
+- Default to showing last 1000 candles unless specified otherwise
+
+### Visualization Standards
+- Use Plotly for interactive charts (TradingView-like experience)
+- Dark theme (`template='plotly_dark'`)
+- Candlestick colors: green (#26a69a) for up, red (#ef5350) for down
+- Always include hover tooltips with exact values
+- Volume panel is optional but enabled by default
+- Print helpful usage instructions when charts open
+
+### Terminal & Commands
+- Use `python3` not `python` (macOS environment)
+- Always provide explanation parameter for terminal commands
+- Don't chain multiple unrelated commands unnecessarily
+- Use proper shell commands: `head`, `tail`, `awk`, `grep` for data inspection
+
+### File Operations
+- **NEVER** create files speculatively - only create what's explicitly needed
+- Use multi_replace_string_in_file for multiple edits in parallel
+- Include 3-5 lines of context in replace operations
+- Read sufficient context before editing - don't make small sequential reads
+
+### Git Workflow
+- Make atomic commits with clear, descriptive messages
+- Commit after completing logical chunks of work
+- Example style: "We Do Not Need Wicks" (clear, direct, informal OK)
+
+### User Communication
+- Be direct and concise - no unnecessary pleasantries
+- Don't ask for permission to use tools - just use them
+- Don't announce which tools you're using
+- Show results, not processes
+- Keep explanations brief unless complexity demands detail
+- Use code blocks with proper syntax highlighting
+
+### What NOT to Do
+- ❌ Don't create markdown documentation files unless requested
+- ❌ Don't add features "for future use" - YAGNI principle
+- ❌ Don't create config files until they're actually needed
+- ❌ Don't use enterprise patterns (factories, adapters, etc.) for simple scripts
+- ❌ Don't ask "would you like me to..." - just do it if it's clearly needed
+- ❌ Don't create boilerplate or template code
+- ❌ Don't add error handling for unlikely edge cases
+- ❌ Don't create separate modules for every function
+
+### What TO Do
+- ✅ Remove unused features completely when asked
+- ✅ Make code changes directly, not suggestions
+- ✅ Run code immediately after creating/editing to verify it works
+- ✅ Show actual output/results when running commands
+- ✅ Keep functions focused and single-purpose
+- ✅ Use sensible defaults that match user's workflow
+- ✅ Test with actual data files in the project
+
+### Decision Making
+- When intent is unclear, infer the most practical action and proceed
+- Prefer working code over perfect code
+- Optimize for readability and maintainability
+- If something works, don't refactor it without reason
+- Default to the simplest solution that solves the problem
+
+### Error Handling
+- Handle expected errors gracefully (missing files, wrong columns)
+- Print clear error messages with suggested solutions
+- Don't catch and hide errors - let them fail loudly if unexpected
+- Validate inputs at function entry points
+
+## PROJECT CONTEXT
+
+**Purpose**: Algorithmic trading analysis and backtesting for cryptocurrency markets
+
+**Primary Assets**: BTC/USDT (Bitcoin)
+
+**Data Source**: Binance exchange historical data
+
+**Current Tools**:
+- `view_chart_interactive.py` - Interactive Plotly chart viewer for OHLCV data
+  - Usage: `python3 view_chart_interactive.py data/btc_15m_data_2018_to_2025.csv [num_candles] [--no-volume]`
+  - Shows last N candles (default 1000) with interactive zoom/pan
+  - Optional volume panel
+
+**Workflow**:
+1. Load historical data from CSV
+2. Analyze/visualize with interactive charts
+3. Develop and backtest trading strategies
+4. Optimize and refine based on results
+
+---
+
+*Remember: This is a practical trading project, not enterprise software. Keep it simple, fast, and functional.*
