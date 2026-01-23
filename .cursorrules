@@ -80,6 +80,7 @@
 - ❌ Don't create boilerplate or template code
 - ❌ Don't add error handling for unlikely edge cases
 - ❌ Don't create separate modules for every function
+- ❌ **NEVER modify working scripts without explicit request** - if it works, leave it alone
 
 ### What TO Do
 - ✅ Remove unused features completely when asked
@@ -112,7 +113,13 @@
 **Data Source**: Binance exchange historical data
 
 **Current Tools**:
-- `view_chart_interactive.py` - Interactive Plotly chart viewer for OHLCV data
+- `dca_strategy.py` - Core DCA strategy implementation (DO NOT MODIFY)
+- `run_backtest.py` - Backtest runner with config file (DO NOT MODIFY)
+- `config_loader.py` - Configuration loader (DO NOT MODIFY)
+- `strategy_config.json` - Strategy configuration file (user edits only)
+- `view_backtest_chart.py` - Interactive chart with trade markers (DO NOT MODIFY)
+- `view_dca_backtest.py` - Detailed DCA visualization with levels (DO NOT MODIFY)
+- `view_chart_interactive.py` - Basic OHLCV chart viewer
   - Usage: `python3 view_chart_interactive.py data/btc_15m_data_2018_to_2025.csv [num_candles] [--no-volume]`
   - Shows last N candles (default 1000) with interactive zoom/pan
   - Optional volume panel
