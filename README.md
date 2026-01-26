@@ -13,8 +13,14 @@ source .venv/bin/activate
 python run_backtest.py
 ```
 
-## View Chart
+## View Chart Pyplot
 ```bash
 source .venv/bin/activate
-python view_backtest_chart.py
+python pyplot-view.py
+```
+
+## Trading View Chart
+```bash
+source .venv/bin/activate
+python trading-view.py
 ```
