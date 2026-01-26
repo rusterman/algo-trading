@@ -566,6 +566,24 @@ def plot_backtest_chart(config_file="strategy_config.json"):
         const candleData = {json.dumps(candles)};
         const volumeData = {json.dumps(volume)};
         const markers = {json.dumps(markers)};
+        const candleByTime = new Map(candleData.map(c => [c.time, c]));
+        const volumeByTime = new Map(volumeData.map(v => [v.time, v.value]));
+
+        function getCandleFromParam(param) {{
+            if (!param) return undefined;
+            const seriesData = param.seriesData && typeof param.seriesData.get === 'function'
+                ? param.seriesData.get(candlestickSeries)
+                : undefined;
+            if (seriesData) return seriesData;
+            const seriesPrices = param.seriesPrices && typeof param.seriesPrices.get === 'function'
+                ? param.seriesPrices.get(candlestickSeries)
+                : undefined;
+            if (seriesPrices) return seriesPrices;
+            if (typeof param.time === 'number') {{
+                return candleByTime.get(param.time);
+            }}
+            return undefined;
+        }}
 
         // Create price chart
         const priceChartElement = document.getElementById('price-chart');
@@ -703,13 +721,11 @@ def plot_backtest_chart(config_file="strategy_config.json"):
         }}
         
         priceChart.subscribeCrosshairMove((param) => {{
-            if (param.time) {{
-                const data = param.seriesData.get(candlestickSeries);
-                const volumeDataPoint = volumeData.find(v => v.time === param.time);
-                
-                if (data) {{
-                    updateOHLCV(data, volumeDataPoint ? volumeDataPoint.value : undefined);
-                }}
+            const data = getCandleFromParam(param);
+            const volumeValue = (param && typeof param.time === 'number') ? volumeByTime.get(param.time) : undefined;
+
+            if (data) {{
+                updateOHLCV(data, volumeValue);
             }} else {{
                 // Show last candle data when not hovering
                 if (candleData.length > 0) {{
@@ -772,8 +788,8 @@ def plot_backtest_chart(config_file="strategy_config.json"):
         priceChart.subscribeCrosshairMove((param) => {{
             if (!isShiftPressed || !isMeasuring) return;
             
-            if (param.time && param.seriesData && measurementStartPrice !== null) {{
-                const data = param.seriesData.get(candlestickSeries);
+            if (param && measurementStartPrice !== null) {{
+                const data = getCandleFromParam(param);
                 if (data && data.close) {{
                     const endPrice = data.close;
                     const priceChange = endPrice - measurementStartPrice;
