@@ -190,6 +190,8 @@ def plot_backtest_chart(config_file="strategy_config.json"):
     # Calculate stats
     total_pnl = sum(t.profit_loss for t in trades)
     roi = (total_pnl / config.initial_budget) * 100 if config.initial_budget > 0 else 0
+    wins = sum(1 for t in trades if t.profit_loss > 0)
+    losses = sum(1 for t in trades if t.profit_loss < 0)
     
     # Create HTML with TradingView Lightweight Charts
     html_content = f"""<!DOCTYPE html>
@@ -493,6 +495,14 @@ def plot_backtest_chart(config_file="strategy_config.json"):
                     <span class="stat-value">{len(trades)}</span>
                 </div>
                 <div class="stat">
+                    <span class="stat-label">Wins</span>
+                    <span class="stat-value positive">{wins}</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Losses</span>
+                    <span class="stat-value negative">{losses}</span>
+                </div>
+                <div class="stat">
                     <span class="stat-label">Total P&L</span>
                     <span class="stat-value {'positive' if total_pnl >= 0 else 'negative'}">${total_pnl:,.2f}</span>
                 </div>
@@ -767,17 +777,30 @@ def plot_backtest_chart(config_file="strategy_config.json"):
         let measurementStartTime = null;
         let isShiftPressed = false;
         let isMeasuring = false;
+
+        function setChartInteraction(enabled) {{
+            priceChart.applyOptions({{
+                handleScroll: enabled ? {{ mouseWheel: true, pressedMouseMove: true }} : false,
+                handleScale: enabled ? {{ axisPressedMouseMove: true, mouseWheel: true, pinch: true }} : false,
+            }});
+            volumeChart.applyOptions({{
+                handleScroll: enabled ? {{ mouseWheel: true, pressedMouseMove: true }} : false,
+                handleScale: enabled ? {{ axisPressedMouseMove: true, mouseWheel: true, pinch: true }} : false,
+            }});
+        }}
         
         // Track shift key state
         document.addEventListener('keydown', (e) => {{
             if (e.key === 'Shift') {{
                 isShiftPressed = true;
+                setChartInteraction(false);
             }}
         }});
         
         document.addEventListener('keyup', (e) => {{
             if (e.key === 'Shift') {{
                 isShiftPressed = false;
+                setChartInteraction(true);
                 if (!isMeasuring) {{
                     document.getElementById('measurement-info').classList.remove('active');
                 }}
@@ -812,6 +835,7 @@ def plot_backtest_chart(config_file="strategy_config.json"):
         // Handle click to start/end measurement
         priceChartElement.addEventListener('mousedown', (e) => {{
             if (!isShiftPressed) return;
+            e.preventDefault();
             
             const param = priceChart.priceScale('right');
             const timeScale = priceChart.timeScale();
