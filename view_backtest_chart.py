@@ -1,10 +1,11 @@
 """
-Interactive chart viewer for backtest results with trade markers
+Interactive chart viewer for backtest results with trade markers using TradingView Lightweight Charts
+Official documentation: https://tradingview.github.io/lightweight-charts/docs
 """
 import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import json
 import sys
+import webbrowser
 from pathlib import Path
 from dca_strategy import DCAStrategy, load_and_prepare_data
 from config_loader import load_config
@@ -12,7 +13,7 @@ from config_loader import load_config
 
 def plot_backtest_chart(config_file="strategy_config.json"):
     """
-    Plot interactive chart with backtest trades marked
+    Plot interactive chart with backtest trades marked using TradingView Lightweight Charts
     
     Args:
         config_file: Path to configuration JSON file
@@ -71,169 +72,783 @@ def plot_backtest_chart(config_file="strategy_config.json"):
     # Use full dataframe for plotting
     df = df_full
     
-    # Create chart
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.7, 0.3],
-        subplot_titles=['Price with Trades', 'Volume']
-    )
+    # Drop rows with any null values in OHLCV columns
+    df = df.dropna(subset=['open', 'high', 'low', 'close', 'volume'])
     
-    # Add candlestick chart
-    fig.add_trace(
-        go.Candlestick(
-            x=df['datetime'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
-            name='OHLC',
-            increasing_line_color='#26a69a',
-            decreasing_line_color='#ef5350'
-        ),
-        row=1, col=1
-    )
+    # Ensure all numeric columns are valid and positive
+    df = df[(df['open'] > 0) & (df['high'] > 0) & (df['low'] > 0) & (df['close'] > 0) & (df['volume'] >= 0)]
     
-    # Add volume bars
-    colors = ['#26a69a' if close >= open else '#ef5350' 
-              for close, open in zip(df['close'], df['open'])]
+    # Sort by datetime to ensure chronological order
+    df = df.sort_values('datetime').reset_index(drop=True)
     
-    fig.add_trace(
-        go.Bar(
-            x=df['datetime'],
-            y=df['volume'],
-            name='Volume',
-            marker_color=colors,
-            showlegend=False
-        ),
-        row=2, col=1
-    )
+    # Additional validation: ensure high >= low, high >= open, high >= close, low <= open, low <= close
+    df = df[(df['high'] >= df['low']) & 
+            (df['high'] >= df['open']) & 
+            (df['high'] >= df['close']) & 
+            (df['low'] <= df['open']) & 
+            (df['low'] <= df['close'])]
     
-    # Add trade markers
-    for i, trade in enumerate(trades, 1):
-        # Trade start marker (anchor price)
-        fig.add_trace(
-            go.Scatter(
-                x=[trade.start_time],
-                y=[trade.anchor_price],
-                mode='markers',
-                marker=dict(
-                    symbol='circle',
-                    size=12,
-                    color='yellow',
-                    line=dict(color='white', width=2)
-                ),
-                name=f'Trade {i} Start',
-                showlegend=True,
-                hovertemplate=f'<b>Trade {i} Start</b><br>' +
-                             f'Anchor: ${trade.anchor_price:,.2f}<br>' +
-                             f'Time: {trade.start_time.strftime("%Y-%m-%d %H:%M")}<extra></extra>'
-            ),
-            row=1, col=1
-        )
-        
-        # DCA entry markers
-        # Get the filled DCA levels from the trade
-        for level_num in trade.dca_levels_filled:
-            # Calculate DCA entry price
-            dump_pct = config.dca_levels[level_num - 1]
-            entry_price = trade.anchor_price * (1 + dump_pct / 100)
+    print(f"Valid candles for charting: {len(df)}")
+    
+    # Prepare candlestick data for TradingView Lightweight Charts
+    # For intraday data (15m, 1h, 4h), use Unix timestamps in seconds
+    # For daily data, use YYYY-MM-DD string format
+    candles = []
+    seen_times = set()
+    
+    for _, row in df.iterrows():
+        try:
+            # Use Unix timestamp in seconds for intraday data
+            time_value = int(row['datetime'].timestamp())
             
-            fig.add_trace(
-                go.Scatter(
-                    x=[trade.start_time],  # Use start time for DCA markers
-                    y=[entry_price],
-                    mode='markers',
-                    marker=dict(
-                        symbol='triangle-down',
-                        size=10,
-                        color='red',
-                        line=dict(color='white', width=1)
-                    ),
-                    name=f'Trade {i} DCA-{level_num}',
-                    showlegend=True,
-                    hovertemplate=f'<b>DCA-{level_num} ({dump_pct}%)</b><br>' +
-                                 f'Price: ${entry_price:,.2f}<br>' +
-                                 f'Budget: ${config.budget_allocation[level_num-1]:,.2f}<extra></extra>'
-                ),
-                row=1, col=1
-            )
+            # Skip duplicate timestamps
+            if time_value in seen_times:
+                continue
+            seen_times.add(time_value)
+            
+            # Validate OHLC relationships
+            o, h, l, c = float(row['open']), float(row['high']), float(row['low']), float(row['close'])
+            
+            if not (h >= max(o, c) and l <= min(o, c) and h >= l):
+                continue
+            
+            candles.append({
+                'time': time_value,
+                'open': o,
+                'high': h,
+                'low': l,
+                'close': c
+            })
+        except (ValueError, TypeError, OverflowError) as e:
+            continue
+    
+    print(f"Prepared {len(candles)} valid candles")
+    
+    # Prepare volume data
+    volume = []
+    seen_volume_times = set()
+    
+    for _, row in df.iterrows():
+        try:
+            time_value = int(row['datetime'].timestamp())
+            
+            # Skip duplicate timestamps
+            if time_value in seen_volume_times:
+                continue
+            seen_volume_times.add(time_value)
+            
+            vol = float(row['volume'])
+            if vol < 0 or not (0 <= vol < float('inf')):
+                continue
+                
+            volume.append({
+                'time': time_value,
+                'value': vol
+            })
+        except (ValueError, TypeError, OverflowError) as e:
+            continue
+    
+    print(f"Prepared {len(volume)} valid volume bars")
+    
+    # Prepare trade markers
+    markers = []
+    
+    for i, trade in enumerate(trades, 1):
+        trade_start_time = int(trade.start_time.timestamp())
+        trade_end_time = int(trade.end_time.timestamp())
         
-        # Trade exit marker (take profit)
-        fig.add_trace(
-            go.Scatter(
-                x=[trade.end_time],
-                y=[trade.exit_price],
-                mode='markers',
-                marker=dict(
-                    symbol='triangle-up',
-                    size=12,
-                    color='lime',
-                    line=dict(color='white', width=2)
-                ),
-                name=f'Trade {i} Exit',
-                showlegend=True,
-                hovertemplate=f'<b>Trade {i} Exit</b><br>' +
-                             f'Exit: ${trade.exit_price:,.2f}<br>' +
-                             f'P&L: ${trade.profit_loss:,.2f} ({trade.profit_percent:.2f}%)<br>' +
-                             f'Time: {trade.end_time.strftime("%Y-%m-%d %H:%M")}<extra></extra>'
-            ),
-            row=1, col=1
-        )
+        # Anchor marker (yellow circle)
+        markers.append({
+            'time': trade_start_time,
+            'position': 'inBar',
+            'color': '#FFD700',
+            'shape': 'circle',
+            'text': f'T{i}'
+        })
         
-        # Draw line connecting trade start to exit
-        fig.add_trace(
-            go.Scatter(
-                x=[trade.start_time, trade.end_time],
-                y=[trade.anchor_price, trade.exit_price],
-                mode='lines',
-                line=dict(color='cyan', width=1, dash='dot'),
-                showlegend=False,
-                hoverinfo='skip'
-            ),
-            row=1, col=1
-        )
+        # DCA entry markers (red arrows pointing up)
+        for level_num in trade.dca_levels_filled:
+            dump_pct = config.dca_levels[level_num - 1]
+            markers.append({
+                'time': trade_start_time,
+                'position': 'belowBar',
+                'color': '#ef5350',
+                'shape': 'arrowUp',
+                'text': f'DCA{level_num} ({dump_pct:+.1f}%)'
+            })
+        
+        # Exit marker (green arrow pointing down)
+        exit_profit_pct = ((trade.exit_price - trade.anchor_price) / trade.anchor_price) * 100
+        markers.append({
+            'time': trade_end_time,
+            'position': 'aboveBar',
+            'color': '#00FF00',
+            'shape': 'arrowDown',
+            'text': f'TP{i} (+{exit_profit_pct:.1f}%)'
+        })
     
-    # Update layout
-    fig.update_layout(
-        title=f'DCA Strategy Backtest - {Path(config.csv_file).stem}<br>' +
-              f'<sub>Trades: {len(trades)} | Total P&L: ${sum(t.profit_loss for t in trades):,.2f} | ' +
-              f'ROI: {(sum(t.profit_loss for t in trades) / config.initial_budget) * 100:.2f}%</sub>',
-        xaxis_rangeslider_visible=False,
-        height=800,
-        template='plotly_dark',
-        hovermode='closest',
-        showlegend=True,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.01
-        )
-    )
+    # Calculate stats
+    total_pnl = sum(t.profit_loss for t in trades)
+    roi = (total_pnl / config.initial_budget) * 100 if config.initial_budget > 0 else 0
     
-    # Update axes
-    fig.update_xaxes(title_text="Date", row=2, col=1)
-    fig.update_yaxes(title_text="Price (USDT)", row=1, col=1)
-    fig.update_yaxes(title_text="Volume", row=2, col=1)
+    # Create HTML with TradingView Lightweight Charts
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DCA Strategy Backtest - {Path(config.csv_file).stem}</title>
+    <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * {{
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }}
+        
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #131722;
+            color: #d1d4dc;
+            padding: 20px;
+        }}
+        
+        .container {{
+            max-width: 1600px;
+            margin: 0 auto;
+        }}
+        
+        .header {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        
+        h1 {{
+            font-size: 28px;
+            color: #ffffff;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }}
+        
+        .stats {{
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 15px;
+        }}
+        
+        .stat {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }}
+        
+        .stat-label {{
+            color: #787b86;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        
+        .stat-value {{
+            color: #ffffff;
+            font-size: 24px;
+            font-weight: 700;
+        }}
+        
+        .positive {{
+            color: #26a69a;
+        }}
+        
+        .negative {{
+            color: #ef5350;
+        }}
+        
+        .charts-container {{
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }}
+        
+        #candle-info {{
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(19, 23, 34, 0.85);
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-size: 13px;
+            z-index: 100;
+            pointer-events: none;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }}
+        
+        #candle-info .info-item {{
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }}
+        
+        #candle-info .label {{
+            color: #787b86;
+            font-size: 11px;
+            text-transform: uppercase;
+        }}
+        
+        #candle-info .value {{
+            color: #ffffff;
+            font-weight: 600;
+            font-size: 14px;
+        }}
+        
+        #candle-info .value.up {{
+            color: #26a69a;
+        }}
+        
+        #candle-info .value.down {{
+            color: #ef5350;
+        }}
+        
+        #price-chart {{
+            height: 600px;
+            position: relative;
+        }}
+        
+        #volume-chart {{
+            height: 150px;
+            position: relative;
+        }}
+        
+        .legend {{
+            margin-top: 30px;
+            padding: 20px;
+            background: #1e222d;
+            border-radius: 8px;
+            border: 1px solid #2a2e39;
+        }}
+        
+        .legend-title {{
+            font-weight: 600;
+            margin-bottom: 15px;
+            font-size: 16px;
+            color: #ffffff;
+        }}
+        
+        .legend-items {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 12px;
+        }}
+        
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }}
+        
+        .legend-marker {{
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }}
+        
+        .legend-marker.circle {{
+            background: #FFD700;
+            box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+        }}
+        
+        .legend-marker.up {{
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 14px solid #ef5350;
+            border-radius: 0;
+        }}
+        
+        .legend-marker.down {{
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 14px solid #00FF00;
+            border-radius: 0;
+        }}
+        
+        .controls {{
+            margin-top: 20px;
+            padding: 15px;
+            background: #1e222d;
+            border-radius: 8px;
+            border: 1px solid #2a2e39;
+            font-size: 13px;
+            color: #787b86;
+        }}
+        
+        .controls strong {{
+            color: #ffffff;
+            display: block;
+            margin-bottom: 8px;
+        }}
+        
+        .controls ul {{
+            list-style: none;
+            padding-left: 0;
+        }}
+        
+        .controls li {{
+            padding: 4px 0;
+        }}
+        
+        .controls li:before {{
+            content: "•";
+            color: #2962FF;
+            font-weight: bold;
+            display: inline-block;
+            width: 1em;
+            margin-left: 0;
+        }}
+        
+        #measurement-info {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(30, 34, 45, 0.95);
+            border: 2px solid #2962FF;
+            border-radius: 8px;
+            padding: 15px 20px;
+            display: none;
+            min-width: 250px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }}
+        
+        #measurement-info.active {{
+            display: block;
+        }}
+        
+        #measurement-info .title {{
+            font-weight: 600;
+            color: #2962FF;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }}
+        
+        #measurement-info .item {{
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            font-size: 13px;
+        }}
+        
+        #measurement-info .label {{
+            color: #787b86;
+        }}
+        
+        #measurement-info .value {{
+            color: #ffffff;
+            font-weight: 600;
+        }}
+        
+        #measurement-info .change-positive {{
+            color: #26a69a;
+        }}
+        
+        #measurement-info .change-negative {{
+            color: #ef5350;
+        }}
+    </style>
+</head>
+<body>
+    <div id="measurement-info">
+        <div class="title">📏 Measurement Tool</div>
+        <div class="item">
+            <span class="label">Start Price:</span>
+            <span class="value" id="start-price">-</span>
+        </div>
+        <div class="item">
+            <span class="label">End Price:</span>
+            <span class="value" id="end-price">-</span>
+        </div>
+        <div class="item">
+            <span class="label">Change:</span>
+            <span class="value" id="price-change">-</span>
+        </div>
+        <div class="item">
+            <span class="label">Percentage:</span>
+            <span class="value" id="percentage-change">-</span>
+        </div>
+    </div>
     
-    # Fix timezone - ensure dates are displayed as-is without conversion
-    fig.update_xaxes(type='date', tickformat='%Y-%m-%d %H:%M')
+    <div class="container">
+        <div class="header">
+            <div class="stats">
+                <div class="stat">
+                    <span class="stat-label">Trades</span>
+                    <span class="stat-value">{len(trades)}</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Total P&L</span>
+                    <span class="stat-value {'positive' if total_pnl >= 0 else 'negative'}">${total_pnl:,.2f}</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">ROI</span>
+                    <span class="stat-value {'positive' if roi >= 0 else 'negative'}">{roi:.2f}%</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="charts-container">
+            <div id="price-chart">
+                <div id="candle-info">
+                    <div class="info-item">
+                        <span class="label">O</span>
+                        <span class="value" id="info-open">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">H</span>
+                        <span class="value" id="info-high">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">L</span>
+                        <span class="value" id="info-low">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">C</span>
+                        <span class="value" id="info-close">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Vol</span>
+                        <span class="value" id="info-volume">-</span>
+                    </div>
+                </div>
+            </div>
+            <div id="volume-chart"></div>
+        </div>
+        
+        <div class="legend">
+            <div class="legend-title">📊 Chart Legend</div>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <div class="legend-marker circle"></div>
+                    <span>Trade Start (Anchor Price)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-marker up"></div>
+                    <span>DCA Entry (Buy on Dip)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-marker down"></div>
+                    <span>Take Profit Exit</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <strong>Interactive Controls:</strong>
+            <ul>
+                <li>Scroll wheel to zoom in/out</li>
+                <li>Click and drag to pan horizontally</li>
+                <li>Double-click to fit all data</li>
+                <li>Hover over markers for trade details</li>
+                <li><strong>Hold Shift + Click & Drag</strong> to measure price change between two points</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Data from backtest
+        const candleData = {json.dumps(candles)};
+        const volumeData = {json.dumps(volume)};
+        const markers = {json.dumps(markers)};
+
+        // Create price chart
+        const priceChartElement = document.getElementById('price-chart');
+        const priceChart = LightweightCharts.createChart(priceChartElement, {{
+            width: priceChartElement.clientWidth,
+            height: 600,
+            layout: {{
+                background: {{ color: '#131722' }},
+                textColor: '#d1d4dc',
+            }},
+            grid: {{
+                vertLines: {{ color: '#1e222d' }},
+                horzLines: {{ color: '#1e222d' }},
+            }},
+            crosshair: {{
+                mode: LightweightCharts.CrosshairMode.Normal,
+            }},
+            rightPriceScale: {{
+                borderColor: '#2b2b43',
+                scaleMargins: {{
+                    top: 0.1,
+                    bottom: 0.2,
+                }},
+            }},
+            timeScale: {{
+                borderColor: '#2b2b43',
+                timeVisible: true,
+                secondsVisible: false,
+            }},
+            handleScroll: {{
+                mouseWheel: true,
+                pressedMouseMove: true,
+            }},
+            handleScale: {{
+                axisPressedMouseMove: true,
+                mouseWheel: true,
+                pinch: true,
+            }},
+        }});
+
+        // Add candlestick series
+        const candlestickSeries = priceChart.addCandlestickSeries({{
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderDownColor: '#ef5350',
+            borderUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
+            wickUpColor: '#26a69a',
+        }});
+
+        candlestickSeries.setData(candleData);
+        candlestickSeries.setMarkers(markers);
+
+        // Create volume chart
+        const volumeChartElement = document.getElementById('volume-chart');
+        const volumeChart = LightweightCharts.createChart(volumeChartElement, {{
+            width: volumeChartElement.clientWidth,
+            height: 150,
+            layout: {{
+                background: {{ color: '#131722' }},
+                textColor: '#d1d4dc',
+            }},
+            grid: {{
+                vertLines: {{ color: '#1e222d' }},
+                horzLines: {{ color: '#1e222d' }},
+            }},
+            rightPriceScale: {{
+                borderColor: '#2b2b43',
+                scaleMargins: {{
+                    top: 0.1,
+                    bottom: 0,
+                }},
+            }},
+            timeScale: {{
+                borderColor: '#2b2b43',
+                timeVisible: true,
+                secondsVisible: false,
+                visible: true,
+            }},
+            handleScroll: {{
+                mouseWheel: true,
+                pressedMouseMove: true,
+            }},
+            handleScale: {{
+                axisPressedMouseMove: true,
+                mouseWheel: true,
+                pinch: true,
+            }},
+        }});
+
+        // Add volume histogram
+        const volumeSeries = volumeChart.addHistogramSeries({{
+            color: '#26a69a',
+            priceFormat: {{
+                type: 'volume',
+            }},
+            priceScaleId: '',
+        }});
+
+        volumeSeries.setData(volumeData);
+        
+        // Update OHLCV info on crosshair move
+        function formatNumber(num) {{
+            if (num >= 1000000) {{
+                return (num / 1000000).toFixed(2) + 'M';
+            }} else if (num >= 1000) {{
+                return (num / 1000).toFixed(2) + 'K';
+            }}
+            return num.toFixed(2);
+        }}
+        
+        function updateOHLCV(data, volumeValue) {{
+            if (!data) return;
+            
+            const isUp = data.close >= data.open;
+            
+            document.getElementById('info-open').textContent = '$' + data.open.toFixed(2);
+            document.getElementById('info-high').textContent = '$' + data.high.toFixed(2);
+            document.getElementById('info-low').textContent = '$' + data.low.toFixed(2);
+            
+            const closeEl = document.getElementById('info-close');
+            closeEl.textContent = '$' + data.close.toFixed(2);
+            closeEl.className = isUp ? 'value up' : 'value down';
+            
+            if (volumeValue !== undefined) {{
+                document.getElementById('info-volume').textContent = formatNumber(volumeValue);
+            }}
+        }}
+        
+        // Initialize with last candle
+        if (candleData.length > 0) {{
+            const lastCandle = candleData[candleData.length - 1];
+            const lastVolume = volumeData.length > 0 ? volumeData[volumeData.length - 1].value : 0;
+            updateOHLCV(lastCandle, lastVolume);
+        }}
+        
+        priceChart.subscribeCrosshairMove((param) => {{
+            if (param.time) {{
+                const data = param.seriesData.get(candlestickSeries);
+                const volumeDataPoint = volumeData.find(v => v.time === param.time);
+                
+                if (data) {{
+                    updateOHLCV(data, volumeDataPoint ? volumeDataPoint.value : undefined);
+                }}
+            }} else {{
+                // Show last candle data when not hovering
+                if (candleData.length > 0) {{
+                    const lastCandle = candleData[candleData.length - 1];
+                    const lastVolume = volumeData.length > 0 ? volumeData[volumeData.length - 1].value : 0;
+                    updateOHLCV(lastCandle, lastVolume);
+                }}
+            }}
+        }});
+
+        // Sync time scales between charts
+        priceChart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {{
+            if (timeRange) {{
+                volumeChart.timeScale().setVisibleRange(timeRange);
+            }}
+        }});
+
+        volumeChart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {{
+            if (timeRange) {{
+                priceChart.timeScale().setVisibleRange(timeRange);
+            }}
+        }});
+
+        // Handle window resize
+        window.addEventListener('resize', () => {{
+            priceChart.applyOptions({{ 
+                width: priceChartElement.clientWidth 
+            }});
+            volumeChart.applyOptions({{ 
+                width: volumeChartElement.clientWidth 
+            }});
+        }});
+
+        // Fit content on load
+        priceChart.timeScale().fitContent();
+        
+        // Price measurement tool
+        let measurementStartPrice = null;
+        let measurementStartTime = null;
+        let isShiftPressed = false;
+        let isMeasuring = false;
+        
+        // Track shift key state
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'Shift') {{
+                isShiftPressed = true;
+            }}
+        }});
+        
+        document.addEventListener('keyup', (e) => {{
+            if (e.key === 'Shift') {{
+                isShiftPressed = false;
+                if (!isMeasuring) {{
+                    document.getElementById('measurement-info').classList.remove('active');
+                }}
+            }}
+        }});
+        
+        // Handle crosshair move for measurement
+        priceChart.subscribeCrosshairMove((param) => {{
+            if (!isShiftPressed || !isMeasuring) return;
+            
+            if (param.time && param.seriesData && measurementStartPrice !== null) {{
+                const data = param.seriesData.get(candlestickSeries);
+                if (data && data.close) {{
+                    const endPrice = data.close;
+                    const priceChange = endPrice - measurementStartPrice;
+                    const percentageChange = (priceChange / measurementStartPrice) * 100;
+                    
+                    // Update measurement display
+                    document.getElementById('start-price').textContent = `$${{measurementStartPrice.toFixed(2)}}`;
+                    document.getElementById('end-price').textContent = `$$${{endPrice.toFixed(2)}}`;
+                    document.getElementById('price-change').textContent = `$$${{priceChange.toFixed(2)}}`;
+                    
+                    const percentEl = document.getElementById('percentage-change');
+                    percentEl.textContent = `${{percentageChange >= 0 ? '+' : ''}}${{percentageChange.toFixed(2)}}%`;
+                    percentEl.className = `value ${{percentageChange >= 0 ? 'change-positive' : 'change-negative'}}`;
+                    
+                    document.getElementById('measurement-info').classList.add('active');
+                }}
+            }}
+        }});
+        
+        // Handle click to start/end measurement
+        priceChartElement.addEventListener('mousedown', (e) => {{
+            if (!isShiftPressed) return;
+            
+            const param = priceChart.priceScale('right');
+            const timeScale = priceChart.timeScale();
+            
+            // Get price at click location
+            const rect = priceChartElement.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const price = candlestickSeries.coordinateToPrice(y);
+            
+            if (price) {{
+                measurementStartPrice = price;
+                isMeasuring = true;
+                document.getElementById('measurement-info').classList.add('active');
+                
+                // Update start price
+                document.getElementById('start-price').textContent = `$$${{price.toFixed(2)}}`;
+                document.getElementById('end-price').textContent = '-';
+                document.getElementById('price-change').textContent = '-';
+                document.getElementById('percentage-change').textContent = '-';
+            }}
+        }});
+        
+        priceChartElement.addEventListener('mouseup', () => {{
+            if (isMeasuring) {{
+                isMeasuring = false;
+                // Keep the measurement displayed until shift is released
+            }}
+        }});
+    </script>
+</body>
+</html>"""
     
-    print("\n✓ Opening interactive chart in browser...")
+    # Save HTML file
+    output_file = Path("backtest") / "backtest_chart.html"
+    output_file.parent.mkdir(exist_ok=True)
+    output_file.write_text(html_content)
+    
+    print("\n✓ Chart generated successfully!")
+    print(f"  📊 Output: {output_file}")
+    print(f"  🌐 Using: TradingView Lightweight Charts")
+    print("\nLegend:")
     print("  🟡 Yellow circles = Trade start (anchor)")
-    print("  🔴 Red triangles = DCA entries")
-    print("  🟢 Green triangles = Take profit exits")
-    print("  📈 Cyan lines = Trade duration")
+    print("  🔴 Red arrows = DCA entries")
+    print("  🟢 Green arrows = Take profit exits")
     print("\nInteractive controls:")
-    print("  • Hover over markers to see details")
-    print("  • Click and drag to zoom")
-    print("  • Double-click to reset zoom")
-    print("  • Click legend items to show/hide")
+    print("  • Scroll wheel to zoom in/out")
+    print("  • Click and drag to pan")
+    print("  • Double-click to fit content")
+    print("  • Hover over markers for details")
     
-    # Show the plot
-    fig.show()
+    # Open in browser
+    webbrowser.open(f"file://{output_file.absolute()}")
+    print(f"\n✓ Opening chart in browser...")
 
 
 def main():
@@ -244,6 +859,7 @@ def main():
     
     print(f"{'='*70}")
     print(f"DCA STRATEGY BACKTEST CHART VIEWER")
+    print(f"Using TradingView Lightweight Charts")
     print(f"{'='*70}")
     print(f"Config file: {config_file}\n")
     
