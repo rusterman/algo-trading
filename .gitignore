@@ -35,4 +35,4 @@ results/
 
 # OS
 .DS_Store
-reports/*
+.reports/*
