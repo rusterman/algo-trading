@@ -60,10 +60,10 @@ def plot_backtest_chart(config_file="strategy_config.json"):
     print("\nRunning backtest...")
     strategy = DCAStrategy(
         initial_budget=config.initial_budget,
-        budget_per_level=config.budget_allocation
+        budget_per_level=config.budget_allocation,
+        dca_levels=config.dca_levels,
+        take_profit_percent=config.take_profit_percent
     )
-    strategy.DCA_LEVELS = config.dca_levels
-    strategy.TAKE_PROFIT_PERCENT = config.take_profit_percent
     
     trades = strategy.run_backtest(df_backtest)
     print(f"Found {len(trades)} trades\n")

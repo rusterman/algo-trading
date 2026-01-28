@@ -1,9 +1,9 @@
 {
-  "csv_file": "data/xagusd_15m_converted.csv",
-  "start_date": "2018-01-01",
-  "end_date": "2025-09-11",
+  "csv_file": "data/btc_15m_data_2018_to_2025.csv",
+  "start_date": "2020-01-01",
+  "end_date": "2026-01-12",
   "initial_budget": 22256,
-  "dca_levels": [-10, -13, -16, -20, -24, -28],
-  "dca_allocations": [1290, 1935, 2580, 6451, 5000, 5000],
+  "dca_levels": [-6, -12, -18, -24, -30, -36],
+  "dca_allocations": [1290, 1935, 2580, 6451, 8386, 8614],
   "take_profit_percent": 5.0
 }

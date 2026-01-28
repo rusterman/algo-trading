@@ -1,315 +1,31 @@
 #!/usr/bin/env python3
 """
-Generate an investor-ready Excel report from DCA Strategy backtest output.
-Parses terminal output and creates a structured, professional Excel workbook.
+Generate an investor-ready Excel report from DCA Strategy backtest results.
+Uses config_loader and DCAStrategy directly for accurate, flexible reporting.
 """
 
-import re
-import json
-import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Any
+
+import pandas as pd
 import openpyxl
 from openpyxl.styles import (
-    Font, PatternFill, Alignment, Border, Side, 
-    numbers, DEFAULT_FONT
+    Font, PatternFill, Alignment, Border, Side
 )
-from openpyxl.utils import get_column_letter
 
-
-class BacktestOutputParser:
-    """Parse backtest terminal output to extract metrics."""
-    
-    def __init__(self, output: str):
-        self.output = output
-        self.metrics = {}
-        self._parse()
-    
-    def _parse(self):
-        """Extract all metrics from the output."""
-        # Config section
-        self.metrics['asset'] = self._extract_asset()
-        self.metrics['csv_file'] = self._extract_csv_file()
-        self.metrics['period_start'] = self._extract_start_date()
-        self.metrics['period_end'] = self._extract_end_date()
-        self.metrics['initial_budget'] = self._extract_initial_budget()
-        self.metrics['dca_levels'] = self._extract_dca_levels()
-        self.metrics['dca_allocations'] = self._extract_dca_allocations()
-        self.metrics['take_profit'] = self._extract_take_profit()
-        
-        # Results section
-        self.metrics['total_trades'] = self._extract_total_trades()
-        self.metrics['winning_trades'] = self._extract_winning_trades()
-        self.metrics['losing_trades'] = self._extract_losing_trades()
-        self.metrics['win_rate'] = self._extract_win_rate()
-        self.metrics['total_profit'] = self._extract_total_profit()
-        self.metrics['roi'] = self._extract_roi()
-        self.metrics['avg_trade_duration'] = self._extract_avg_trade_duration()
-        self.metrics['min_duration'] = self._extract_min_duration()
-        self.metrics['max_duration'] = self._extract_max_duration()
-        self.metrics['average_win'] = self._extract_average_win()
-        
-        # Trades
-        self.metrics['trades'] = self._extract_trades()
-        
-        # Calculate monthly stats
-        self.metrics['monthly_stats'] = self._calculate_monthly_stats()
-        
-        # Calculate capital metrics
-        self.metrics['capital_stats'] = self._calculate_capital_stats()
-        
-        # Drawdown analysis
-        self.metrics['drawdown_analysis'] = self._calculate_drawdown_analysis()
-        
-        # Trade duration stats
-        self.metrics['duration_stats'] = self._calculate_duration_stats()
-    
-    def _extract_asset(self) -> str:
-        """Extract asset name from CSV file."""
-        match = re.search(r'data/([a-zA-Z0-9]+)_', self.output)
-        if match:
-            return match.group(1).upper()
-        return "UNKNOWN"
-    
-    def _extract_csv_file(self) -> str:
-        """Extract CSV file name."""
-        match = re.search(r'CSV File:\s+([^\n]+)', self.output)
-        if match:
-            return match.group(1).strip()
-        return ""
-    
-    def _extract_start_date(self) -> str:
-        """Extract start date."""
-        match = re.search(r'Date Range:\s+(\d{4}-\d{2}-\d{2})', self.output)
-        if match:
-            return match.group(1)
-        return ""
-    
-    def _extract_end_date(self) -> str:
-        """Extract end date."""
-        match = re.search(r'Date Range:.*?→\s*(\d{4}-\d{2}-\d{2})', self.output)
-        if match:
-            return match.group(1)
-        return ""
-    
-    def _extract_initial_budget(self) -> float:
-        """Extract initial budget."""
-        match = re.search(r'Initial Budget:\s+\$([0-9,]+\.\d{2})', self.output)
-        if match:
-            return float(match.group(1).replace(',', ''))
-        return 0.0
-    
-    def _extract_dca_levels(self) -> List[int]:
-        """Extract DCA levels."""
-        match = re.search(r'DCA Levels:\s+\[([-\d, ]+)\]', self.output)
-        if match:
-            levels_str = match.group(1)
-            return [int(x.strip()) for x in levels_str.split(',')]
-        return []
-    
-    def _extract_dca_allocations(self) -> List[float]:
-        """Extract DCA allocations."""
-        match = re.search(r'DCA Allocations:\s+\[([\$0-9\', ]+)\]', self.output)
-        if match:
-            alloc_str = match.group(1)
-            allocations = []
-            for val in re.findall(r'\$([0-9,]+)', alloc_str):
-                allocations.append(float(val.replace(',', '')))
-            return allocations
-        return []
-    
-    def _extract_take_profit(self) -> float:
-        """Extract take profit percentage."""
-        match = re.search(r'Take Profit:\s+([+-]?\d+\.\d+)%', self.output)
-        if match:
-            return float(match.group(1))
-        return 0.0
-    
-    def _extract_total_trades(self) -> int:
-        """Extract total trades count."""
-        match = re.search(r'Total Trades:\s+(\d+)', self.output)
-        if match:
-            return int(match.group(1))
-        return 0
-    
-    def _extract_winning_trades(self) -> int:
-        """Extract winning trades."""
-        match = re.search(r'Winning Trades:\s+(\d+)', self.output)
-        if match:
-            return int(match.group(1))
-        return 0
-    
-    def _extract_losing_trades(self) -> int:
-        """Extract losing trades."""
-        match = re.search(r'Losing Trades:\s+(\d+)', self.output)
-        if match:
-            return int(match.group(1))
-        return 0
-    
-    def _extract_win_rate(self) -> float:
-        """Extract win rate."""
-        match = re.search(r'Winning Trades:\s+\d+\s+\(([0-9.]+)%\)', self.output)
-        if match:
-            return float(match.group(1))
-        return 0.0
-    
-    def _extract_total_profit(self) -> float:
-        """Extract total profit/loss."""
-        match = re.search(r'Total Profit/Loss:\s+\$([0-9,.]+)', self.output)
-        if match:
-            return float(match.group(1).replace(',', ''))
-        return 0.0
-    
-    def _extract_roi(self) -> float:
-        """Extract ROI percentage."""
-        match = re.search(r'ROI:\s+([0-9.]+)%', self.output)
-        if match:
-            return float(match.group(1))
-        return 0.0
-    
-    def _extract_avg_trade_duration(self) -> float:
-        """Extract average trade duration in days."""
-        match = re.search(r'Avg Trade Duration:\s+([0-9.]+) days', self.output)
-        if match:
-            return float(match.group(1))
-        return 0.0
-    
-    def _extract_min_duration(self) -> float:
-        """Extract minimum duration."""
-        match = re.search(r'Min/Max Duration:\s+([0-9.]+) /', self.output)
-        if match:
-            return float(match.group(1))
-        return 0.0
-    
-    def _extract_max_duration(self) -> float:
-        """Extract maximum duration."""
-        match = re.search(r'Min/Max Duration:.*?/\s+([0-9.]+) day', self.output)
-        if match:
-            return float(match.group(1))
-        return 0.0
-    
-    def _extract_average_win(self) -> float:
-        """Extract average win."""
-        match = re.search(r'Average Win:\s+\$([0-9,.]+)', self.output)
-        if match:
-            return float(match.group(1).replace(',', ''))
-        return 0.0
-    
-    def _extract_trades(self) -> List[Dict[str, Any]]:
-        """Extract individual trade details."""
-        trades = []
-        # Split by "Trade:" pattern
-        trade_blocks = re.split(r'Trade:\s+', self.output)
-        
-        for block in trade_blocks[1:]:  # Skip first empty split
-            trade = {}
-            
-            # Extract dates and duration
-            date_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+→\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', block)
-            if date_match:
-                trade['entry_date'] = date_match.group(1)
-                trade['exit_date'] = date_match.group(2)
-            
-            duration_match = re.search(r'Duration:\s+([0-9.]+) days', block)
-            if duration_match:
-                trade['duration_days'] = float(duration_match.group(1))
-            
-            profit_match = re.search(r'Profit/Loss:\s+\$([0-9,.]+)', block)
-            if profit_match:
-                trade['profit'] = float(profit_match.group(1).replace(',', ''))
-            
-            invested_match = re.search(r'Total Invested:\s+\$([0-9,.]+)', block)
-            if invested_match:
-                trade['invested'] = float(invested_match.group(1).replace(',', ''))
-            
-            if trade and 'duration_days' in trade and 'profit' in trade:
-                trades.append(trade)
-        
-        return trades
-    
-    def _calculate_monthly_stats(self) -> Dict[str, Dict[str, Any]]:
-        """Calculate monthly performance statistics."""
-        monthly = {}
-        
-        for trade in self.metrics.get('trades', []):
-            if 'entry_date' not in trade:
-                continue
-            
-            # Extract year-month from entry date
-            month_str = trade['entry_date'][:7]  # YYYY-MM
-            
-            if month_str not in monthly:
-                monthly[month_str] = {'trades': 0, 'profit': 0.0}
-            
-            monthly[month_str]['trades'] += 1
-            monthly[month_str]['profit'] += trade.get('profit', 0.0)
-        
-        # Calculate profit percentage for each month
-        initial_budget = self.metrics.get('initial_budget', 1.0)
-        for month in monthly:
-            monthly[month]['profit_pct'] = (monthly[month]['profit'] / initial_budget) * 100
-        
-        return monthly
-    
-    def _calculate_capital_stats(self) -> Dict[str, float]:
-        """Calculate capital utilization statistics."""
-        stats = {}
-        
-        trades = self.metrics.get('trades', [])
-        if trades:
-            invested_amounts = [t.get('invested', 0) for t in trades]
-            initial_budget = self.metrics.get('initial_budget', 1.0)
-            
-            avg_capital_used = sum(invested_amounts) / len(invested_amounts)
-            peak_capital_used = max(invested_amounts)
-            
-            stats['avg_capital_used_pct'] = (avg_capital_used / initial_budget) * 100
-            stats['peak_capital_used_pct'] = (peak_capital_used / initial_budget) * 100
-            stats['capital_buffer_pct'] = 100 - stats['peak_capital_used_pct']
-            stats['capital_efficiency'] = self.metrics.get('total_profit', 0.0) / avg_capital_used if avg_capital_used > 0 else 0
-        
-        return stats
-    
-    def _calculate_drawdown_analysis(self) -> Dict[str, int]:
-        """Analyze trades by drawdown ranges."""
-        analysis = {
-            '-5% to -10%': 0,
-            '-10% to -20%': 0,
-            '-20% to -30%': 0,
-            '-30%+': 0
-        }
-        
-        # For now, since we don't have detailed drawdown info per trade,
-        # we'll return zeros (can be enhanced with more detailed parsing)
-        return analysis
-    
-    def _calculate_duration_stats(self) -> Dict[str, Any]:
-        """Calculate trade duration statistics."""
-        stats = {}
-        
-        trades = self.metrics.get('trades', [])
-        durations = [t.get('duration_days', 0) for t in trades if 'duration_days' in t]
-        
-        if durations:
-            stats['avg_duration'] = sum(durations) / len(durations)
-            stats['max_duration'] = max(durations)
-            stats['min_duration'] = min(durations)
-            stats['longer_than_30d'] = sum(1 for d in durations if d > 30)
-        else:
-            stats['avg_duration'] = 0
-            stats['max_duration'] = 0
-            stats['min_duration'] = 0
-            stats['longer_than_30d'] = 0
-        
-        return stats
+from config_loader import load_config
+from dca_strategy import DCAStrategy, load_and_prepare_data
 
 
 class ExcelReportGenerator:
-    """Generate a professional Excel report from parsed metrics."""
+    """Generate a professional Excel report from backtest results."""
     
-    def __init__(self, metrics: Dict[str, Any]):
-        self.metrics = metrics
+    def __init__(self, config, strategy, trades):
+        self.config = config
+        self.strategy = strategy
+        self.trades = trades
         self.wb = openpyxl.Workbook()
         self.ws = self.wb.active
         self.ws.title = "Backtest Report"
@@ -413,33 +129,115 @@ class ExcelReportGenerator:
         
         self.current_row += 1
     
+    def _extract_asset_name(self) -> str:
+        """Extract asset name from CSV file path."""
+        csv_file = self.config.csv_file
+        return Path(csv_file).stem.split('_')[0].upper()
+    
+    def _calculate_monthly_stats(self) -> Dict[str, Dict[str, Any]]:
+        """Calculate monthly performance statistics from trades."""
+        monthly = {}
+        
+        for trade in self.trades:
+            # Extract year-month from entry timestamp
+            entry_time = trade.start_time
+            month_str = entry_time.strftime('%Y-%m')
+            
+            if month_str not in monthly:
+                monthly[month_str] = {'trades': 0, 'profit': 0.0}
+            
+            monthly[month_str]['trades'] += 1
+            monthly[month_str]['profit'] += trade.profit_loss
+        
+        # Calculate profit percentage for each month
+        initial_budget = self.strategy.initial_budget
+        for month in monthly:
+            monthly[month]['profit_pct'] = (monthly[month]['profit'] / initial_budget) * 100
+        
+        return monthly
+    
+    def _calculate_capital_stats(self) -> Dict[str, float]:
+        """Calculate capital utilization statistics."""
+        stats = {}
+        
+        if self.trades:
+            invested_amounts = [t.total_invested for t in self.trades]
+            initial_budget = self.strategy.initial_budget
+            
+            avg_capital_used = sum(invested_amounts) / len(invested_amounts)
+            peak_capital_used = max(invested_amounts)
+            
+            stats['avg_capital_used_pct'] = (avg_capital_used / initial_budget) * 100
+            stats['peak_capital_used_pct'] = (peak_capital_used / initial_budget) * 100
+            stats['capital_buffer_pct'] = 100 - stats['peak_capital_used_pct']
+            stats['capital_efficiency'] = sum(t.profit_loss for t in self.trades) / avg_capital_used if avg_capital_used > 0 else 0
+        else:
+            stats = {
+                'avg_capital_used_pct': 0,
+                'peak_capital_used_pct': 0,
+                'capital_buffer_pct': 0,
+                'capital_efficiency': 0
+            }
+        
+        return stats
+    
+    def _calculate_duration_stats(self) -> Dict[str, Any]:
+        """Calculate trade duration statistics."""
+        stats = {}
+        
+        if self.trades:
+            durations = [(t.end_time - t.start_time).total_seconds() / 86400.0 for t in self.trades]
+            
+            stats['avg_duration'] = sum(durations) / len(durations)
+            stats['max_duration'] = max(durations)
+            stats['min_duration'] = min(durations)
+            stats['longer_than_30d'] = sum(1 for d in durations if d > 30)
+        else:
+            stats = {
+                'avg_duration': 0,
+                'max_duration': 0,
+                'min_duration': 0,
+                'longer_than_30d': 0
+            }
+        
+        return stats
+    
     def generate(self):
         """Generate the complete report."""
         self._set_column_widths()
         
         # Strategy Overview
         self._add_section_header("STRATEGY OVERVIEW")
-        self._add_key_value("Asset", self.metrics['asset'])
-        self._add_key_value("Period Start", self.metrics['period_start'])
-        self._add_key_value("Period End", self.metrics['period_end'])
+        asset_name = self._extract_asset_name()
+        self._add_key_value("Asset", asset_name)
+        self._add_key_value("Period Start", self.config.start_date or "Start")
+        self._add_key_value("Period End", self.config.end_date or "End")
         self._add_key_value("Strategy Type", "Mean Reversion")
         self._add_key_value("Model", "DCA (Spot)")
-        dca_levels_str = ", ".join([str(abs(x)) for x in self.metrics['dca_levels']])
+        dca_levels_str = ", ".join([str(abs(x)) for x in self.config.dca_levels])
         self._add_key_value("DCA Levels (%)", dca_levels_str)
-        self._add_key_value("Take Profit (%)", self.metrics['take_profit'])
+        self._add_key_value("Take Profit (%)", self.config.take_profit_percent)
         
         # Core Performance Metrics
         self._add_section_header("CORE PERFORMANCE METRICS")
-        self._add_key_value("Total Trades", self.metrics['total_trades'], 'number')
-        self._add_key_value("Winning Trades", self.metrics['winning_trades'], 'number')
-        self._add_key_value("Win Rate (%)", self.metrics['win_rate'] / 100, 'percentage')
-        self._add_key_value("Losing Trades", self.metrics['losing_trades'], 'number')
-        self._add_key_value("Loss Rate (%)", (100 - self.metrics['win_rate']) / 100, 'percentage')
-        self._add_key_value("Total Net Profit ($)", self.metrics['total_profit'], 'currency')
-        self._add_key_value("Total Net Profit (%)", self.metrics['roi'] / 100, 'percentage')
+        total_profit = sum(t.profit_loss for t in self.trades)
+        win_count = sum(1 for t in self.trades if t.profit_loss > 0)
+        loss_count = sum(1 for t in self.trades if t.profit_loss <= 0)
+        win_rate = (win_count / len(self.trades) * 100) if self.trades else 0
+        loss_rate = 100 - win_rate
+        roi = (total_profit / self.strategy.initial_budget) * 100 if self.strategy.initial_budget > 0 else 0
+        
+        self._add_key_value("Total Trades", len(self.trades), 'number')
+        self._add_key_value("Winning Trades", win_count, 'number')
+        self._add_key_value("Win Rate (%)", win_rate / 100, 'percentage')
+        self._add_key_value("Losing Trades", loss_count, 'number')
+        self._add_key_value("Loss Rate (%)", loss_rate / 100, 'percentage')
+        self._add_key_value("Total Net Profit ($)", total_profit, 'currency')
+        self._add_key_value("Total Net Profit (%)", roi / 100, 'percentage')
         
         # Calculate average monthly return
-        monthly_returns = [m['profit_pct'] for m in self.metrics['monthly_stats'].values()]
+        monthly_stats = self._calculate_monthly_stats()
+        monthly_returns = [m['profit_pct'] for m in monthly_stats.values()]
         avg_monthly_return = sum(monthly_returns) / len(monthly_returns) if monthly_returns else 0
         self._add_key_value("Average Monthly Return (%)", avg_monthly_return / 100, 'percentage')
         
@@ -447,8 +245,8 @@ class ExcelReportGenerator:
         self._add_section_header("MONTHLY PERFORMANCE")
         self._add_table_header(["Month", "Trade Count", "Profit ($)", "Profit (%)"])
         
-        for month in sorted(self.metrics['monthly_stats'].keys()):
-            stats = self.metrics['monthly_stats'][month]
+        for month in sorted(monthly_stats.keys()):
+            stats = monthly_stats[month]
             self._add_table_row(
                 [month, stats['trades'], stats['profit'], stats['profit_pct'] / 100],
                 ['text', 'number', 'currency', 'percentage']
@@ -456,7 +254,7 @@ class ExcelReportGenerator:
         
         # Capital Utilization & Efficiency
         self._add_section_header("CAPITAL UTILIZATION & EFFICIENCY")
-        capital_stats = self.metrics['capital_stats']
+        capital_stats = self._calculate_capital_stats()
         self._add_key_value("Average Capital Used (%)", capital_stats.get('avg_capital_used_pct', 0) / 100, 'percentage')
         self._add_key_value("Peak Capital Used (%)", capital_stats.get('peak_capital_used_pct', 0) / 100, 'percentage')
         self._add_key_value("Capital Buffer (Minimum Remaining %)", capital_stats.get('capital_buffer_pct', 0) / 100, 'percentage')
@@ -465,16 +263,24 @@ class ExcelReportGenerator:
         # Drawdown Analysis
         self._add_section_header("DRAWDOWN ANALYSIS")
         self._add_table_header(["Drawdown Range", "Trade Count", "Max Drawdown (%)"])
-        drawdown = self.metrics['drawdown_analysis']
-        for range_label in ['-5% to -10%', '-10% to -20%', '-20% to -30%', '-30%+']:
+        drawdown_ranges = {
+            '-5% to -10%': (0.05, 0.10),
+            '-10% to -20%': (0.10, 0.20),
+            '-20% to -30%': (0.20, 0.30),
+            '-30%+': (0.30, float('inf'))
+        }
+        
+        for range_label, (min_dd, max_dd) in drawdown_ranges.items():
+            # Count trades in this drawdown range (simplified)
+            count = 0
             self._add_table_row(
-                [range_label, drawdown.get(range_label, 0), 0],
+                [range_label, count, 0],
                 ['text', 'number', 'percentage']
             )
         
         # Trade Duration Statistics
         self._add_section_header("TRADE DURATION STATISTICS")
-        duration_stats = self.metrics['duration_stats']
+        duration_stats = self._calculate_duration_stats()
         self._add_key_value("Average Trade Duration (Days)", duration_stats.get('avg_duration', 0), 'number')
         self._add_key_value("Longest Trade Duration (Days)", duration_stats.get('max_duration', 0), 'number')
         self._add_key_value("Trades Longer Than 30 Days", duration_stats.get('longer_than_30d', 0), 'number')
@@ -493,43 +299,73 @@ class ExcelReportGenerator:
         self.wb.save(filepath)
 
 
-def run_backtest() -> str:
-    """Run the backtest and capture output."""
-    result = subprocess.run(
-        ['python', 'run_backtest.py'],
-        capture_output=True,
-        text=True,
-        cwd='/Users/rustam/Desktop/projects/algo-trading'
+def run_backtest_and_generate_report(config_file: str = "strategy_config.json"):
+    """
+    Run backtest and generate Excel report.
+    
+    Args:
+        config_file: Path to configuration JSON file
+    """
+    # Load configuration
+    print("Loading configuration...")
+    config = load_config(config_file)
+    config.print_config()
+    
+    # Load data
+    print(f"\nLoading {config.csv_file}...")
+    df = load_and_prepare_data(config.csv_file)
+    
+    # Filter by date range if specified
+    if config.start_date:
+        start = pd.to_datetime(config.start_date)
+        df = df[df['datetime'] >= start]
+        print(f"Filtered to start date: {start}")
+    
+    if config.end_date:
+        end = pd.to_datetime(config.end_date)
+        df = df[df['datetime'] <= end]
+        print(f"Filtered to end date: {end}")
+    
+    print(f"\nBacktest data: {len(df)} candles")
+    print(f"Date range: {df['datetime'].iloc[0]} to {df['datetime'].iloc[-1]}")
+    
+    # Create strategy with all config parameters
+    print(f"\nInitializing strategy...")
+    strategy = DCAStrategy(
+        initial_budget=config.initial_budget,
+        budget_per_level=config.budget_allocation,
+        dca_levels=config.dca_levels,
+        take_profit_percent=config.take_profit_percent,
     )
-    return result.stdout + result.stderr
-
-
-def main():
-    """Main execution."""
-    print("Running backtest...")
-    output = run_backtest()
     
-    print("Parsing backtest output...")
-    parser = BacktestOutputParser(output)
-    metrics = parser.metrics
+    # Run backtest
+    print(f"\nRunning backtest...")
+    trades = strategy.run_backtest(df)
     
-    print(f"Asset: {metrics['asset']}")
-    print(f"Total Trades: {metrics['total_trades']}")
-    print(f"Total Profit: ${metrics['total_profit']:.2f}")
+    # Print results summary
+    print(f"\n{'='*70}")
+    print(f"BACKTEST COMPLETED")
+    print(f"{'='*70}")
+    print(f"Total trades: {len(trades)}")
+    if trades:
+        total_pnl = sum(t.profit_loss for t in trades)
+        print(f"Total P&L: ${total_pnl:,.2f}")
+        print(f"ROI: {(total_pnl / strategy.initial_budget) * 100:.2f}%")
     
-    print("Generating Excel report...")
-    generator = ExcelReportGenerator(metrics)
+    # Generate Excel report
+    print(f"\nGenerating Excel report...")
+    generator = ExcelReportGenerator(config, strategy, trades)
     wb = generator.generate()
     
     # Generate filename with timestamp
     now = datetime.now()
     timestamp = now.strftime("%Y-%m-%d-%H-%M-%S")
-    asset = metrics['asset']
-    filename = f"{timestamp}-{asset}-backtest.xlsx"
-    filepath = f"/Users/rustam/Desktop/projects/algo-trading/reports/{filename}"
+    csv_filename = Path(config.csv_file).stem  # e.g., "xagusd_15m_converted"
+    filename = f"{timestamp}-{csv_filename}.xlsx"
+    filepath = f"reports/{filename}"
     
     # Ensure reports directory exists
-    Path('/Users/rustam/Desktop/projects/algo-trading/reports').mkdir(parents=True, exist_ok=True)
+    Path("reports").mkdir(parents=True, exist_ok=True)
     
     generator.save(filepath)
     
@@ -537,6 +373,30 @@ def main():
     print(f"📊 File: {filepath}")
     
     return filepath
+
+
+def main():
+    if len(sys.argv) > 1:
+        config_file = sys.argv[1]
+    else:
+        config_file = "strategy_config.json"
+    
+    print(f"{'='*70}")
+    print(f"DCA STRATEGY - EXCEL REPORT GENERATOR")
+    print(f"{'='*70}")
+    print(f"Config file: {config_file}\n")
+    
+    try:
+        filepath = run_backtest_and_generate_report(config_file)
+        print(f"\n{'='*70}")
+        print(f"SUCCESS")
+        print(f"{'='*70}")
+        print(f"Report saved to: {filepath}")
+    except Exception as e:
+        print(f"\n❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == '__main__':
