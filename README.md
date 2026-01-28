@@ -24,3 +24,11 @@ python pyplot-view.py
 source .venv/bin/activate
 python trading-view.py
 ```
+
+## Generate Excel Report
+```bash
+source .venv/bin/activate
+python generate_excel_report.py
+```
+
+The Excel report will be saved in the `reports/` directory with filename format: `YYYY-MM-DD-HH-MM-SS-[ASSET]-backtest.xlsx`
