@@ -40,12 +40,10 @@ def run_backtest_from_config(config_file="strategy_config.json"):
     print(f"\nInitializing strategy...")
     strategy = DCAStrategy(
         initial_budget=config.initial_budget,
-        budget_per_level=config.budget_allocation
+        budget_per_level=config.budget_allocation,
+        dca_levels=config.dca_levels,
+        take_profit_percent=config.take_profit_percent,
     )
-    
-    # Override DCA levels and take profit from config
-    strategy.DCA_LEVELS = config.dca_levels
-    strategy.TAKE_PROFIT_PERCENT = config.take_profit_percent
     
     # Run backtest
     print(f"\nRunning backtest...")

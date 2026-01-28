@@ -51,7 +51,7 @@ from pathlib import Path
 @dataclass
 class DCALevel:
     """Represents a single DCA level"""
-    level_num: int          # 1-6
+    level_num: int          # 1..N
     dump_percent: float     # -6%, -9%, etc.
     entry_price: float      # Calculated entry price
     budget_allocation: float  # Fixed budget for this level
@@ -77,23 +77,29 @@ class Trade:
 
 class DCAStrategy:
     """
-    DCA Strategy with fixed dump levels and take-profit target
+    DCA Strategy with adjustable dump levels and take-profit target
     
     Key features:
-    - Static DCA levels: -6%, -9%, -12%, -16%, -20%, -24%
+    - Configurable DCA levels (negative percentages)
     - Uses only candle wicks (high/low)
     - Fixed budget allocation per level
     - Take profit at +5% from deepest DCA level
     - Restarts after each complete trade
     """
     
-    # Static DCA dump levels (negative percentages)
-    DCA_LEVELS = [-6, -9, -12, -16, -20, -24]
+    # Default DCA dump levels (negative percentages)
+    DEFAULT_DCA_LEVELS = [-6, -9, -12, -16, -20, -24]
     
     # Take profit target (positive percentage from deepest level)
-    TAKE_PROFIT_PERCENT = 5.0
+    DEFAULT_TAKE_PROFIT_PERCENT = 5.0
     
-    def __init__(self, initial_budget: float = 1000, budget_per_level: Optional[List[float]] = None):
+    def __init__(
+        self,
+        initial_budget: float = 1000,
+        budget_per_level: Optional[List[float]] = None,
+        dca_levels: Optional[List[float]] = None,
+        take_profit_percent: Optional[float] = None,
+    ):
         """
         Initialize DCA strategy
         
@@ -101,15 +107,23 @@ class DCAStrategy:
             initial_budget: Starting budget (default: $1000)
             budget_per_level: Optional custom budget allocation per level
                             If None, uses equal distribution
+            dca_levels: Optional custom DCA dump levels (negative percentages)
+            take_profit_percent: Optional custom take-profit percentage
         """
         self.initial_budget = initial_budget
+        self.dca_levels = dca_levels or self.DEFAULT_DCA_LEVELS
+        self.take_profit_percent = (
+            take_profit_percent
+            if take_profit_percent is not None
+            else self.DEFAULT_TAKE_PROFIT_PERCENT
+        )
         
-        # Default equal budget allocation across 6 levels
+        # Default equal budget allocation across N levels
         if budget_per_level is None:
-            self.budget_per_level = [initial_budget / 6] * 6
+            self.budget_per_level = [initial_budget / len(self.dca_levels)] * len(self.dca_levels)
         else:
-            if len(budget_per_level) != 6:
-                raise ValueError("Must provide exactly 6 budget allocations")
+            if len(budget_per_level) != len(self.dca_levels):
+                raise ValueError("Budget allocations must match DCA levels length")
             self.budget_per_level = budget_per_level
         
         # Strategy state
@@ -137,7 +151,7 @@ class DCAStrategy:
             List of DCALevel objects with calculated entry prices
         """
         dca_levels = []
-        for i, dump_pct in enumerate(self.DCA_LEVELS, start=1):
+        for i, dump_pct in enumerate(self.dca_levels, start=1):
             entry_price = anchor_price * (1 + dump_pct / 100)
             dca_levels.append(DCALevel(
                 level_num=i,
@@ -209,7 +223,7 @@ class DCAStrategy:
         
         # tp_price = avg_price * (1 + target_profit)
         # Equivalent to: (1 + target_profit) * A / Q
-        tp_price = avg_price * (1 + self.TAKE_PROFIT_PERCENT / 100)
+        tp_price = avg_price * (1 + self.take_profit_percent / 100)
         
         return tp_price
     
@@ -328,7 +342,7 @@ class DCAStrategy:
                 # Check if price dumped to first DCA level or beyond
                 dump_from_anchor = ((candle_low - self.anchor_price) / self.anchor_price) * 100
                 
-                if dump_from_anchor <= self.DCA_LEVELS[0]:  # e.g., -6%
+                if dump_from_anchor <= self.dca_levels[0]:  # e.g., -6%
                     # Start new trade
                     self.in_trade = True
                     self.trade_start_time = timestamp
@@ -497,8 +511,8 @@ def main():
     
     print(f"\nRunning DCA Strategy Backtest...")
     print(f"Initial Budget: ${initial_budget:,.2f}")
-    print(f"DCA Levels: {strategy.DCA_LEVELS}")
-    print(f"Take Profit: +{strategy.TAKE_PROFIT_PERCENT}%")
+    print(f"DCA Levels: {strategy.dca_levels}")
+    print(f"Take Profit: +{strategy.take_profit_percent}%")
     
     # Run backtest
     trades = strategy.run_backtest(df)

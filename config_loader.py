@@ -33,8 +33,8 @@ class StrategyConfig:
         """Validate configuration values"""
         # Validate DCA levels
         levels = self.config['dca_levels']
-        if len(levels) != 6:
-            raise ValueError(f"Must have exactly 6 DCA levels, got {len(levels)}")
+        if len(levels) < 1:
+            raise ValueError("Must have at least 1 DCA level")
         
         if not all(l < 0 for l in levels):
             raise ValueError("All DCA levels must be negative percentages")
@@ -45,14 +45,12 @@ class StrategyConfig:
         # Validate DCA allocations if provided
         if 'dca_allocations' in self.config:
             allocations = self.config['dca_allocations']
-            if len(allocations) != 6:
-                raise ValueError(f"Must have exactly 6 DCA allocations, got {len(allocations)}")
+            if len(allocations) != len(levels):
+                raise ValueError(
+                    f"DCA allocations length ({len(allocations)}) must match DCA levels length ({len(levels)})"
+                )
             if not all(a > 0 for a in allocations):
                 raise ValueError("All DCA allocations must be positive")
-            # Verify total matches initial_budget
-            total = sum(allocations)
-            if abs(total - self.config['initial_budget']) > 0.01:
-                raise ValueError(f"Sum of DCA allocations ({total}) must equal initial_budget ({self.config['initial_budget']})")
         
         # Validate budget
         if self.config['initial_budget'] <= 0:
@@ -86,12 +84,13 @@ class StrategyConfig:
     
     @property
     def budget_allocation(self) -> List[float]:
-        """Get budget allocation per DCA level (custom or equal split)"""
+        """Get budget allocation per DCA level (custom or % of initial budget)"""
         if 'dca_allocations' in self.config:
             return self.config['dca_allocations']
-        # Default: equal split
+        # Default: allocation is abs(level)% of initial budget
+        # Example: level -10 => 10% of initial_budget
         budget = self.initial_budget
-        return [budget / 6] * 6
+        return [budget * (abs(level) / 100.0) for level in self.dca_levels]
     
     @property
     def dca_levels(self) -> List[float]:
@@ -114,6 +113,7 @@ class StrategyConfig:
         print(f"DCA Levels:         {self.dca_levels}")
         allocations = self.budget_allocation
         print(f"DCA Allocations:    {[f'${a:,.0f}' for a in allocations]}")
+        print(f"Allocation Rule:    abs(level)% of initial budget")
         print(f"Take Profit:        +{self.take_profit_percent}%")
         print(f"\nDCA Table:")
         print(f"{'Level':<8} {'Dump %':<10} {'Order ($)':<12}")
