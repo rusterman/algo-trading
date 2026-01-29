@@ -39,4 +39,5 @@ results/
 # Generated reports and charts
 reports/*.xlsx
 reports/*.html
+backtest/*.xlsx
 backtest/*.html
