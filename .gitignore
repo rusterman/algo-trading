@@ -35,5 +35,8 @@ results/
 
 # OS
 .DS_Store
+
+# Generated reports and charts
 reports/*.xlsx
-backtest/backtest_chart.html
+reports/*.html
+backtest/*.html
