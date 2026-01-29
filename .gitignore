@@ -35,5 +35,5 @@ results/
 
 # OS
 .DS_Store
-.reports/*
-.backtest/*
+reports/*.xlsx
+backtest/backtest_chart.html

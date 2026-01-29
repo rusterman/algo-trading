@@ -202,6 +202,37 @@ class ExcelReportGenerator:
         
         return stats
     
+    def _calculate_drawdown_analysis(self) -> Dict[str, Dict[str, Any]]:
+        """Calculate drawdown analysis from trades."""
+        analysis = {
+            '-5% to -10%': {'count': 0, 'max_dd': 0},
+            '-10% to -20%': {'count': 0, 'max_dd': 0},
+            '-20% to -30%': {'count': 0, 'max_dd': 0},
+            '-30%+': {'count': 0, 'max_dd': 0}
+        }
+        
+        for trade in self.trades:
+            # Calculate drawdown for this trade
+            # Drawdown = (deepest_price - anchor_price) / anchor_price
+            drawdown_pct = abs((trade.deepest_price - trade.anchor_price) / trade.anchor_price) * 100
+            
+            # Categorize into ranges
+            if drawdown_pct < 5:
+                continue  # Skip very small drawdowns
+            elif drawdown_pct < 10:
+                range_key = '-5% to -10%'
+            elif drawdown_pct < 20:
+                range_key = '-10% to -20%'
+            elif drawdown_pct < 30:
+                range_key = '-20% to -30%'
+            else:
+                range_key = '-30%+'
+            
+            analysis[range_key]['count'] += 1
+            analysis[range_key]['max_dd'] = max(analysis[range_key]['max_dd'], drawdown_pct)
+        
+        return analysis
+    
     def generate(self):
         """Generate the complete report."""
         self._set_column_widths()
@@ -263,18 +294,13 @@ class ExcelReportGenerator:
         # Drawdown Analysis
         self._add_section_header("DRAWDOWN ANALYSIS")
         self._add_table_header(["Drawdown Range", "Trade Count", "Max Drawdown (%)"])
-        drawdown_ranges = {
-            '-5% to -10%': (0.05, 0.10),
-            '-10% to -20%': (0.10, 0.20),
-            '-20% to -30%': (0.20, 0.30),
-            '-30%+': (0.30, float('inf'))
-        }
         
-        for range_label, (min_dd, max_dd) in drawdown_ranges.items():
-            # Count trades in this drawdown range (simplified)
-            count = 0
+        drawdown_analysis = self._calculate_drawdown_analysis()
+        
+        for range_label in ['-5% to -10%', '-10% to -20%', '-20% to -30%', '-30%+']:
+            data = drawdown_analysis[range_label]
             self._add_table_row(
-                [range_label, count, 0],
+                [range_label, data['count'], data['max_dd'] / 100],
                 ['text', 'number', 'percentage']
             )
         
