@@ -1,0 +1,27 @@
+{
+  "csv_file": "data/sol_15m_data_2020_to_2025.csv",
+  "start_date": "2020-01-01",
+  "end_date": "2026-01-01",
+  "initial_budget": 100000,
+  "dca_levels": [
+    -3,
+    -6,
+    -10,
+    -13,
+    -16,
+    -20,
+    -25,
+    -30
+  ],
+  "dca_allocations": [
+    1000,
+    2000,
+    4000,
+    8000,
+    16000,
+    32000,
+    64000,
+    128000
+  ],
+  "take_profit_percent": 10.0
+}

@@ -42,15 +42,17 @@ class StrategyConfig:
         if levels != sorted(levels, reverse=True):
             raise ValueError("DCA levels must be in descending order (e.g., -6, -9, -12...)")
         
-        # Validate DCA allocations if provided
+        # Validate DCA allocations if provided - auto-adjust if mismatch
         if 'dca_allocations' in self.config:
             allocations = self.config['dca_allocations']
-            if len(allocations) != len(levels):
-                raise ValueError(
-                    f"DCA allocations length ({len(allocations)}) must match DCA levels length ({len(levels)})"
-                )
             if not all(a > 0 for a in allocations):
                 raise ValueError("All DCA allocations must be positive")
+            
+            # If allocation length doesn't match levels, auto-generate to match
+            if len(allocations) != len(levels):
+                print(f"⚠️  DCA allocations length ({len(allocations)}) doesn't match levels ({len(levels)})")
+                print(f"   Auto-generating allocations to match {len(levels)} levels...")
+                # Don't raise error - let budget_allocation property handle it
         
         # Validate budget
         if self.config['initial_budget'] <= 0:
@@ -86,11 +88,28 @@ class StrategyConfig:
     def budget_allocation(self) -> List[float]:
         """Get budget allocation per DCA level (custom or % of initial budget)"""
         if 'dca_allocations' in self.config:
-            return self.config['dca_allocations']
+            allocations = self.config['dca_allocations']
+            # If lengths match, use as-is
+            if len(allocations) == len(self.dca_levels):
+                return allocations
+            # If lengths don't match, auto-generate to match levels
+            else:
+                return self._generate_allocations()
         # Default: allocation is abs(level)% of initial budget
         # Example: level -10 => 10% of initial_budget
+        return self._generate_allocations()
+    
+    def _generate_allocations(self) -> List[float]:
+        """Generate allocations based on levels or initial budget"""
         budget = self.initial_budget
-        return [budget * (abs(level) / 100.0) for level in self.dca_levels]
+        # If initial budget is large enough, use exponential scaling
+        # Otherwise use percentage-based scaling
+        if budget >= 100:
+            # For larger budgets: exponential scaling (1, 2, 4, 8, 16, ...)
+            return [budget / (2 ** i) for i in range(len(self.dca_levels))]
+        else:
+            # For smaller budgets: percentage-based (abs(level)%)
+            return [budget * (abs(level) / 100.0) for level in self.dca_levels]
     
     @property
     def dca_levels(self) -> List[float]:
