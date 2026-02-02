@@ -63,7 +63,8 @@ def plot_backtest_chart(config_file="strategy_config.json"):
         initial_budget=config.initial_budget,
         budget_per_level=config.budget_allocation,
         dca_levels=config.dca_levels,
-        take_profit_percent=config.take_profit_percent
+        take_profit_percent=config.take_profit_percent,
+        stop_loss_percent=config.stop_loss_percent
     )
     
     trades = strategy.run_backtest(df_backtest)
@@ -177,21 +178,35 @@ def plot_backtest_chart(config_file="strategy_config.json"):
                 'text': f'DCA{level_num} ({dump_pct:+.1f}%)'
             })
         
-        # Exit marker (green arrow pointing down)
+        # Exit marker (green for TP, red for SL)
         exit_profit_pct = ((trade.exit_price - trade.anchor_price) / trade.anchor_price) * 100
-        markers.append({
-            'time': trade_end_time,
-            'position': 'aboveBar',
-            'color': '#00FF00',
-            'shape': 'arrowDown',
-            'text': f'TP{i} (+{exit_profit_pct:.1f}%)'
-        })
+        
+        if trade.stop_loss_triggered:
+            # Stop-Loss exit (red arrow pointing down)
+            markers.append({
+                'time': trade_end_time,
+                'position': 'aboveBar',
+                'color': '#EF5350',
+                'shape': 'arrowDown',
+                'text': f'SL{i} ({exit_profit_pct:.1f}%)'
+            })
+        else:
+            # Take-Profit exit (green arrow pointing down)
+            markers.append({
+                'time': trade_end_time,
+                'position': 'aboveBar',
+                'color': '#00FF00',
+                'shape': 'arrowDown',
+                'text': f'TP{i} (+{exit_profit_pct:.1f}%)'
+            })
     
     # Calculate stats
     total_pnl = sum(t.profit_loss for t in trades)
     roi = (total_pnl / config.initial_budget) * 100 if config.initial_budget > 0 else 0
     wins = sum(1 for t in trades if t.profit_loss > 0)
     losses = sum(1 for t in trades if t.profit_loss < 0)
+    stopped_out = sum(1 for t in trades if t.stop_loss_triggered)
+    sl_losses = sum(t.stop_loss_loss for t in trades if t.stop_loss_triggered)
     
     # Create HTML with TradingView Lightweight Charts
     html_content = f"""<!DOCTYPE html>
@@ -503,8 +518,16 @@ def plot_backtest_chart(config_file="strategy_config.json"):
                     <span class="stat-value negative">{losses}</span>
                 </div>
                 <div class="stat">
+                    <span class="stat-label">Stopped Out</span>
+                    <span class="stat-value negative">{stopped_out}</span>
+                </div>
+                <div class="stat">
                     <span class="stat-label">Total P&L</span>
                     <span class="stat-value {'positive' if total_pnl >= 0 else 'negative'}">${total_pnl:,.2f}</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">SL Loss</span>
+                    <span class="stat-value {'positive' if sl_losses >= 0 else 'negative'}">${sl_losses:,.2f}</span>
                 </div>
                 <div class="stat">
                     <span class="stat-label">ROI</span>

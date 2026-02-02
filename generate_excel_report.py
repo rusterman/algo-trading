@@ -203,33 +203,59 @@ class ExcelReportGenerator:
         return stats
     
     def _calculate_drawdown_analysis(self) -> Dict[str, Dict[str, Any]]:
-        """Calculate drawdown analysis from trades."""
-        analysis = {
-            '-5% to -10%': {'count': 0, 'max_dd': 0},
-            '-10% to -20%': {'count': 0, 'max_dd': 0},
-            '-20% to -30%': {'count': 0, 'max_dd': 0},
-            '-30%+': {'count': 0, 'max_dd': 0}
-        }
+        """Calculate drawdown analysis from trades using actual DCA levels."""
+        # Get sorted DCA levels as positive values (e.g., [6, 9, 12, 15, 18])
+        dca_levels = sorted([abs(level) for level in self.config.dca_levels])
         
+        # Create ranges based on actual DCA levels
+        analysis = {}
+        
+        if dca_levels:
+            # Range for trades that close before first DCA (TP before drawdown reaches first level)
+            first_level = dca_levels[0]
+            analysis[f'0% to -{first_level}%'] = {'count': 0, 'max_dd': 0}
+            
+            # Ranges between consecutive DCA levels
+            for i in range(len(dca_levels) - 1):
+                level1 = dca_levels[i]
+                level2 = dca_levels[i + 1]
+                analysis[f'-{level1}% to -{level2}%'] = {'count': 0, 'max_dd': 0}
+            
+            # Beyond deepest level
+            deepest_level = dca_levels[-1]
+            analysis[f'-{deepest_level}%+'] = {'count': 0, 'max_dd': 0}
+        
+        # Categorize trades
         for trade in self.trades:
             # Calculate drawdown for this trade
-            # Drawdown = (deepest_price - anchor_price) / anchor_price
             drawdown_pct = abs((trade.deepest_price - trade.anchor_price) / trade.anchor_price) * 100
             
-            # Categorize into ranges
-            if drawdown_pct < 5:
-                continue  # Skip very small drawdowns
-            elif drawdown_pct < 10:
-                range_key = '-5% to -10%'
-            elif drawdown_pct < 20:
-                range_key = '-10% to -20%'
-            elif drawdown_pct < 30:
-                range_key = '-20% to -30%'
-            else:
-                range_key = '-30%+'
+            # Skip if no meaningful drawdown
+            if drawdown_pct == 0:
+                continue
             
-            analysis[range_key]['count'] += 1
-            analysis[range_key]['max_dd'] = max(analysis[range_key]['max_dd'], drawdown_pct)
+            # Find appropriate range
+            range_key = None
+            if dca_levels:
+                first_level = dca_levels[0]
+                
+                if drawdown_pct < first_level:
+                    # Closed before first DCA level (TP hit before drawdown reached -6%)
+                    range_key = f'0% to -{first_level}%'
+                else:
+                    # Find which DCA level range the drawdown falls into
+                    for i in range(len(dca_levels) - 1):
+                        if dca_levels[i] <= drawdown_pct < dca_levels[i + 1]:
+                            range_key = f'-{dca_levels[i]}% to -{dca_levels[i + 1]}%'
+                            break
+                    
+                    # If at or beyond deepest level
+                    if range_key is None:
+                        range_key = f'-{dca_levels[-1]}%+'
+                
+                if range_key and range_key in analysis:
+                    analysis[range_key]['count'] += 1
+                    analysis[range_key]['max_dd'] = max(analysis[range_key]['max_dd'], drawdown_pct)
         
         return analysis
     
@@ -248,6 +274,7 @@ class ExcelReportGenerator:
         dca_levels_str = ", ".join([str(abs(x)) for x in self.config.dca_levels])
         self._add_key_value("DCA Levels (%)", dca_levels_str)
         self._add_key_value("Take Profit (%)", self.config.take_profit_percent)
+        self._add_key_value("Stop Loss (%)", self.config.stop_loss_percent)
         
         # Core Performance Metrics
         self._add_section_header("CORE PERFORMANCE METRICS")
@@ -265,6 +292,19 @@ class ExcelReportGenerator:
         self._add_key_value("Loss Rate (%)", loss_rate / 100, 'percentage')
         self._add_key_value("Total Net Profit ($)", total_profit, 'currency')
         self._add_key_value("Total Net Profit (%)", roi / 100, 'percentage')
+        
+        # Stop-Loss Metrics (if enabled)
+        if self.config.stop_loss_percent > 0:
+            self._add_section_header("STOP-LOSS ANALYSIS")
+            stopped_out = sum(1 for t in self.trades if t.stop_loss_triggered)
+            sl_loss_total = sum(t.stop_loss_loss for t in self.trades if t.stop_loss_triggered)
+            sl_rate = (stopped_out / len(self.trades) * 100) if self.trades else 0
+            avg_sl_loss = (sl_loss_total / stopped_out) if stopped_out > 0 else 0
+            
+            self._add_key_value("Stopped Out Trades", stopped_out, 'number')
+            self._add_key_value("Stop-Loss Rate (%)", sl_rate / 100, 'percentage')
+            self._add_key_value("Total SL Losses ($)", sl_loss_total, 'currency')
+            self._add_key_value("Average SL Loss ($)", avg_sl_loss, 'currency')
         
         # Calculate average monthly return
         monthly_stats = self._calculate_monthly_stats()
@@ -297,7 +337,9 @@ class ExcelReportGenerator:
         
         drawdown_analysis = self._calculate_drawdown_analysis()
         
-        for range_label in ['-5% to -10%', '-10% to -20%', '-20% to -30%', '-30%+']:
+        # Display in order (sorted by first number in range)
+        for range_label in sorted(drawdown_analysis.keys(), 
+                                  key=lambda x: float(x.split('%')[0].lstrip('-')) if x[0] == '-' else float(x.split('%')[0])):
             data = drawdown_analysis[range_label]
             self._add_table_row(
                 [range_label, data['count'], data['max_dd'] / 100],
@@ -362,6 +404,7 @@ def run_backtest_and_generate_report(config_file: str = "strategy_config.json"):
         budget_per_level=config.budget_allocation,
         dca_levels=config.dca_levels,
         take_profit_percent=config.take_profit_percent,
+        stop_loss_percent=config.stop_loss_percent,
     )
     
     # Run backtest

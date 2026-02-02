@@ -73,6 +73,40 @@ class Trade:
     profit_loss: float
     profit_percent: float
     dca_levels_filled: List[int]
+    
+    # NEW: Stop-loss tracking
+    stop_loss_triggered: bool = False
+    stop_loss_price: Optional[float] = None
+    stop_loss_loss: float = 0.0
+    completion_reason: str = "take_profit"
+
+
+@dataclass
+class BacktestResults:
+    """Comprehensive backtest statistics including stop-loss metrics"""
+    initial_budget: float
+    final_budget: float
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    stopped_out_trades: int
+    
+    total_profit: float
+    total_loss: float
+    net_pnl: float
+    
+    total_roi: float
+    win_rate: float
+    stop_loss_rate: float
+    avg_trade_pnl: float
+    
+    largest_loss: float
+    largest_profit: float
+    avg_loss_magnitude: float
+    avg_profit_magnitude: float
+    
+    avg_trade_duration_days: float
+    total_test_days: float
 
 
 class DCAStrategy:
@@ -99,18 +133,20 @@ class DCAStrategy:
         budget_per_level: Optional[List[float]] = None,
         dca_levels: Optional[List[float]] = None,
         take_profit_percent: Optional[float] = None,
+        stop_loss_percent: float = 0.0,
     ):
         """
-        Initialize DCA strategy
+        Initialize DCA strategy with optional stop-loss
         
         Args:
             initial_budget: Starting budget (default: $1000)
             budget_per_level: Optional custom budget allocation per level
-                            If None, uses equal distribution
             dca_levels: Optional custom DCA dump levels (negative percentages)
             take_profit_percent: Optional custom take-profit percentage
+            stop_loss_percent: Stop-loss percentage (0 = disabled)
         """
         self.initial_budget = initial_budget
+        self.stop_loss_percent = stop_loss_percent
         self.dca_levels = dca_levels or self.DEFAULT_DCA_LEVELS
         self.take_profit_percent = (
             take_profit_percent
@@ -132,6 +168,7 @@ class DCAStrategy:
         self.trade_start_time = None
         self.active_dca_levels: List[DCALevel] = []
         self.completed_trades: List[Trade] = []
+        self.available_budget = initial_budget
         
     def reset_game(self):
         """Reset strategy state for new trade cycle"""
@@ -299,23 +336,227 @@ class DCAStrategy:
         self.completed_trades.append(trade)
         return trade
     
+    def calculate_stop_loss_threshold(self) -> Optional[float]:
+        """
+        Calculate the price threshold that triggers stop-loss.
+        
+        ONLY valid when:
+        - stop_loss_percent > 0 (enabled)
+        - At least one DCA level is filled
+        
+        Formula:
+        - threshold = anchor_price * (1 - stop_loss_percent/100)
+        
+        Returns:
+            float: Stop-loss price threshold
+            None: If stop-loss disabled or no position open
+        """
+        if self.stop_loss_percent <= 0:
+            return None
+        
+        filled_levels = [lvl for lvl in self.active_dca_levels if lvl.filled]
+        if not filled_levels:
+            return None
+        
+        threshold = self.anchor_price * (1 - self.stop_loss_percent / 100)
+        return threshold
+    
+    def check_stop_loss_hit(self, candle_low: float) -> bool:
+        """
+        Check if stop-loss threshold was breached by candle wick.
+        
+        Execution rule: SL triggers if candle.low <= threshold
+        
+        Args:
+            candle_low: Lowest price of current candle
+            
+        Returns:
+            bool: True if stop-loss was triggered
+        """
+        threshold = self.calculate_stop_loss_threshold()
+        
+        if threshold is None:
+            return False
+        
+        return candle_low <= threshold
+    
+    def close_trade_with_loss(
+        self,
+        exit_time: pd.Timestamp,
+        loss_price: float,
+        available_budget: float
+    ) -> tuple[Trade, float]:
+        """
+        Close trade due to stop-loss being triggered.
+        
+        Loss Calculation:
+        - loss_pct = (loss_price - anchor_price) / anchor_price * 100
+        - capital_loss = abs(loss_pct / 100) * total_invested
+        - updated_budget = available_budget - capital_loss
+        
+        Args:
+            exit_time: Timestamp of stop-loss execution
+            loss_price: Price at which stop-loss executed
+            available_budget: Current available capital before loss
+            
+        Returns:
+            tuple[Trade, float]: (Trade object with loss record, updated_budget)
+        """
+        filled_levels = [lvl for lvl in self.active_dca_levels if lvl.filled]
+        deepest_level = self.get_deepest_filled_level()
+        
+        # Calculate total invested capital
+        total_invested = sum(lvl.budget_allocation for lvl in filled_levels)
+        
+        # Calculate unrealized loss percentage at stop price
+        loss_pct = ((loss_price - self.anchor_price) / self.anchor_price) * 100
+        
+        # Calculate actual capital loss amount
+        capital_loss = abs(loss_pct / 100) * total_invested
+        
+        # Update available budget
+        updated_budget = available_budget - capital_loss
+        
+        # Create trade record
+        trade = Trade(
+            start_time=self.trade_start_time,
+            end_time=exit_time,
+            anchor_price=self.anchor_price,
+            deepest_level=deepest_level.level_num,
+            deepest_price=deepest_level.fill_price,
+            exit_price=loss_price,
+            total_invested=total_invested,
+            total_return=loss_price * sum(lvl.budget_allocation / lvl.fill_price 
+                                          for lvl in filled_levels),
+            profit_loss=-capital_loss,
+            profit_percent=loss_pct,
+            dca_levels_filled=[lvl.level_num for lvl in filled_levels],
+            stop_loss_triggered=True,
+            stop_loss_price=loss_price,
+            stop_loss_loss=capital_loss,
+            completion_reason="stop_loss"
+        )
+        
+        self.completed_trades.append(trade)
+        
+        return trade, updated_budget
+    
+    def calculate_backtest_results(self) -> BacktestResults:
+        """
+        Calculate comprehensive backtest statistics.
+        
+        Recalculates ALL metrics considering stop-loss impact:
+        - Available budget affected by losses
+        - Win/loss/stop-out counts
+        - Profit/loss totals
+        - ROI and rates
+        - Risk metrics
+        
+        Returns:
+            BacktestResults object with all statistics
+        """
+        trades = self.completed_trades
+        
+        # Handle empty trades case
+        if not trades:
+            return BacktestResults(
+                initial_budget=self.initial_budget,
+                final_budget=self.initial_budget,
+                total_trades=0,
+                winning_trades=0,
+                losing_trades=0,
+                stopped_out_trades=0,
+                total_profit=0.0,
+                total_loss=0.0,
+                net_pnl=0.0,
+                total_roi=0.0,
+                win_rate=0.0,
+                stop_loss_rate=0.0,
+                avg_trade_pnl=0.0,
+                largest_loss=0.0,
+                largest_profit=0.0,
+                avg_loss_magnitude=0.0,
+                avg_profit_magnitude=0.0,
+                avg_trade_duration_days=0.0,
+                total_test_days=0.0
+            )
+        
+        # Separate trades by outcome
+        winning_trades = [t for t in trades if t.profit_loss > 0]
+        losing_trades = [t for t in trades if t.profit_loss < 0]
+        stopped_out_trades = [t for t in trades if t.stop_loss_triggered]
+        
+        # Profit/Loss totals
+        total_profit = sum(t.profit_loss for t in winning_trades)
+        total_loss = abs(sum(t.profit_loss for t in losing_trades))
+        net_pnl = sum(t.profit_loss for t in trades)
+        
+        # Final budget = initial + all P&L
+        final_budget = self.initial_budget + net_pnl
+        
+        # ROI = (final - initial) / initial * 100
+        total_roi = ((final_budget - self.initial_budget) / self.initial_budget * 100) \
+            if self.initial_budget > 0 else 0.0
+        
+        # Counts and rates
+        total_trades = len(trades)
+        win_rate = (len(winning_trades) / total_trades * 100) if total_trades > 0 else 0.0
+        stop_loss_rate = (len(stopped_out_trades) / total_trades * 100) if total_trades > 0 else 0.0
+        
+        # Averages
+        avg_trade_pnl = net_pnl / total_trades if total_trades > 0 else 0.0
+        avg_loss_magnitude = total_loss / len(losing_trades) if losing_trades else 0.0
+        avg_profit_magnitude = total_profit / len(winning_trades) if winning_trades else 0.0
+        
+        # Extremes
+        largest_loss = min(t.profit_loss for t in trades) if trades else 0.0
+        largest_profit = max(t.profit_loss for t in trades) if trades else 0.0
+        
+        # Duration metrics
+        durations_days = [(t.end_time - t.start_time).total_seconds() / (24 * 3600) 
+                          for t in trades]
+        avg_trade_duration_days = sum(durations_days) / len(durations_days) if durations_days else 0.0
+        
+        if trades:
+            total_test_days = (trades[-1].end_time - trades[0].start_time).total_seconds() / (24 * 3600)
+        else:
+            total_test_days = 0.0
+        
+        return BacktestResults(
+            initial_budget=self.initial_budget,
+            final_budget=final_budget,
+            total_trades=total_trades,
+            winning_trades=len(winning_trades),
+            losing_trades=len(losing_trades),
+            stopped_out_trades=len(stopped_out_trades),
+            total_profit=total_profit,
+            total_loss=total_loss,
+            net_pnl=net_pnl,
+            total_roi=total_roi,
+            win_rate=win_rate,
+            stop_loss_rate=stop_loss_rate,
+            avg_trade_pnl=avg_trade_pnl,
+            largest_loss=largest_loss,
+            largest_profit=largest_profit,
+            avg_loss_magnitude=avg_loss_magnitude,
+            avg_profit_magnitude=avg_profit_magnitude,
+            avg_trade_duration_days=avg_trade_duration_days,
+            total_test_days=total_test_days
+        )
+    
     def run_backtest(self, df: pd.DataFrame) -> List[Trade]:
         """
-        Run deterministic backtest on historical data
+        Run deterministic backtest on historical data with stop-loss support.
         
-        ALGORITHM STEPS:
+        MODIFIED ALGORITHM:
         1. Track anchor price (reference price P0)
         2. When candle.low <= P0 * (1 + first_dca_level), start trade
         3. For each candle in trade:
-           - Check DCA fills: if candle.low <= pi, fill level i
-           - Check TP: if candle.high >= tp_price, close trade
-        4. After TP, reset position completely and start new anchor
-        
-        CONSTRAINTS:
-        - Spot trading only, no leverage
-        - DCA levels executed in order, never skipped
-        - Portfolio-level profit calculation
-        - Deterministic execution (no randomness)
+           a. Check DCA fills: if candle.low <= pi, fill level i
+           b. Check STOP-LOSS: if candle.low <= threshold, close with loss
+           c. Check TP: if candle.high >= tp_price, close with profit
+        4. After close, reset position and start new anchor
+        5. Track available_budget throughout
         
         Args:
             df: DataFrame with columns: datetime, high, low
@@ -326,6 +567,7 @@ class DCAStrategy:
         """
         self.reset_game()
         self.completed_trades = []
+        self.available_budget = self.initial_budget
         
         for idx, row in df.iterrows():
             timestamp = row['datetime']
@@ -356,21 +598,32 @@ class DCAStrategy:
                     self.anchor_price = max(self.anchor_price, candle_high)
                     
             else:
-                # In trade - check for DCA fills and take-profit
+                # In trade - check for events in order
                 
-                # CRITICAL INTRA-CANDLE ORDER:
-                # 1. First check DCA fills (price going down touches low)
-                # 2. Then check TP (price going up touches high) with UPDATED position
-                # This ensures new fills affect the TP calculation before TP check
-                
-                # First check for new DCA fills (order: candle.low <= pi)
+                # STEP 1: Check DCA fills (price going down touches low)
                 newly_filled = self.check_dca_fills(candle_low)
                 
-                # Then check if take-profit was hit (order: candle.high >= tp_price)
-                # TP price is calculated with ALL fills up to this point
+                # STEP 2: Check STOP-LOSS (NEW - BEFORE TP)
+                if self.check_stop_loss_hit(candle_low):
+                    sl_threshold = self.calculate_stop_loss_threshold()
+                    trade, self.available_budget = self.close_trade_with_loss(
+                        timestamp,
+                        sl_threshold,
+                        self.available_budget
+                    )
+                    
+                    # Reset and start looking for next trade
+                    self.reset_game()
+                    self.anchor_price = candle_high
+                    continue  # Skip TP check for this candle
+                
+                # STEP 3: Check TAKE-PROFIT (only if not stopped out)
                 if self.check_take_profit_hit(candle_high):
                     tp_price = self.calculate_take_profit_price()
                     trade = self.close_trade(timestamp, tp_price)
+                    
+                    # Update available budget with profit
+                    self.available_budget += trade.profit_loss
                     
                     # Reset and start looking for next trade
                     # Position resets completely after TP
@@ -380,32 +633,13 @@ class DCAStrategy:
         return self.completed_trades
     
     def print_trade_summary(self, trade: Trade):
-        """Print summary of a single trade"""
-        # Calculate duration
-        duration = trade.end_time - trade.start_time
-        duration_days = duration.total_seconds() / (24 * 3600)
-        duration_hours = duration.total_seconds() / 3600
-        
-        # Format duration
-        if duration_days >= 1:
-            duration_str = f"{duration_days:.2f} days ({duration})"
-        else:
-            duration_str = f"{duration_hours:.2f} hours ({duration})"
-        
-        print(f"\n{'='*70}")
-        print(f"Trade: {trade.start_time} → {trade.end_time}")
-        print(f"{'='*70}")
-        print(f"Duration:           {duration_str}")
-        print(f"Anchor Price:       ${trade.anchor_price:,.2f}")
-        print(f"Deepest Level:      DCA-{trade.deepest_level} (${trade.deepest_price:,.2f})")
-        print(f"Levels Filled:      {trade.dca_levels_filled}")
-        print(f"Exit Price:         ${trade.exit_price:,.2f}")
-        print(f"Total Invested:     ${trade.total_invested:,.2f}")
-        print(f"Total Return:       ${trade.total_return:,.2f}")
-        print(f"Profit/Loss:        ${trade.profit_loss:,.2f} ({trade.profit_percent:+.2f}%)")
+        """Print summary of a single trade (deprecated - use _print_trade_details)"""
+        self._print_trade_details(self.completed_trades.index(trade) + 1, trade)
         
     def print_backtest_results(self):
-        """Print comprehensive backtest results"""
+        """Print comprehensive backtest results with stop-loss metrics"""
+        results = self.calculate_backtest_results()
+        
         if not self.completed_trades:
             print("\nNo completed trades found.")
             return
@@ -413,36 +647,79 @@ class DCAStrategy:
         print(f"\n{'='*70}")
         print(f"BACKTEST RESULTS - DCA STRATEGY")
         print(f"{'='*70}")
-        print(f"Total Trades:       {len(self.completed_trades)}")
+        print(f"Initial Budget:     ${results.initial_budget:,.2f}")
+        print(f"Final Budget:       ${results.final_budget:,.2f}")
+        print(f"Total P&L:          ${results.net_pnl:,.2f}")
+        print(f"ROI:                {results.total_roi:+.2f}%")
         
-        # Calculate aggregate statistics
-        total_profit = sum(t.profit_loss for t in self.completed_trades)
-        winning_trades = [t for t in self.completed_trades if t.profit_loss > 0]
-        losing_trades = [t for t in self.completed_trades if t.profit_loss <= 0]
+        print(f"\n{'Trade Summary':^70}")
+        print(f"{'-'*70}")
+        print(f"Total Trades:       {results.total_trades}")
+        print(f"  Winning:          {results.winning_trades} ({results.win_rate:.1f}%)")
+        print(f"  Losing:           {results.losing_trades} ({100-results.win_rate:.1f}%)")
+        print(f"  Stopped Out:      {results.stopped_out_trades} ({results.stop_loss_rate:.1f}%)")
         
-        # Calculate average trade duration
-        durations = [(t.end_time - t.start_time).total_seconds() / (24 * 3600) for t in self.completed_trades]
-        avg_duration_days = np.mean(durations)
-        min_duration_days = np.min(durations)
-        max_duration_days = np.max(durations)
+        print(f"\n{'Profit & Loss':^70}")
+        print(f"{'-'*70}")
+        print(f"Total Profit:       ${results.total_profit:,.2f}")
+        print(f"Total Loss:         -${results.total_loss:,.2f}")
+        print(f"Avg Trade P&L:      ${results.avg_trade_pnl:,.2f}")
         
-        print(f"Winning Trades:     {len(winning_trades)} ({len(winning_trades)/len(self.completed_trades)*100:.1f}%)")
-        print(f"Losing Trades:      {len(losing_trades)} ({len(losing_trades)/len(self.completed_trades)*100:.1f}%)")
-        print(f"Total Profit/Loss:  ${total_profit:,.2f}")
-        print(f"Avg Trade Duration: {avg_duration_days:.2f} days")
-        print(f"Min/Max Duration:   {min_duration_days:.2f} / {max_duration_days:.2f} days")
+        if results.winning_trades > 0:
+            print(f"Avg Win:            ${results.avg_profit_magnitude:,.2f}")
+        if results.losing_trades > 0:
+            print(f"Avg Loss:           -${results.avg_loss_magnitude:,.2f}")
         
-        if winning_trades:
-            avg_win = np.mean([t.profit_loss for t in winning_trades])
-            print(f"Average Win:        ${avg_win:,.2f}")
+        print(f"Largest Profit:     ${results.largest_profit:,.2f}")
+        print(f"Largest Loss:       ${results.largest_loss:,.2f}")
         
-        if losing_trades:
-            avg_loss = np.mean([t.profit_loss for t in losing_trades])
-            print(f"Average Loss:       ${avg_loss:,.2f}")
+        print(f"\n{'Duration':^70}")
+        print(f"{'-'*70}")
+        print(f"Avg Trade Duration: {results.avg_trade_duration_days:.2f} days")
+        print(f"Total Test Period:  {results.total_test_days:.2f} days")
         
-        # Show each trade
-        for trade in self.completed_trades:
-            self.print_trade_summary(trade)
+        # Print stop-loss info if enabled
+        if self.stop_loss_percent > 0:
+            print(f"\n{'Stop-Loss (Enabled)':^70}")
+            print(f"{'-'*70}")
+            print(f"Stop-Loss %:        {self.stop_loss_percent}%")
+            print(f"Stopped Out:        {results.stopped_out_trades} trades")
+            total_sl_loss = sum(t.stop_loss_loss for t in self.completed_trades 
+                               if t.stop_loss_triggered)
+            print(f"Total SL Loss:      -${total_sl_loss:,.2f}")
+        else:
+            print(f"\n{'Stop-Loss (Disabled)':^70}")
+        
+        # Print individual trades
+        print(f"\n{'='*70}")
+        print(f"TRADE DETAILS")
+        print(f"{'='*70}")
+        for i, trade in enumerate(self.completed_trades, 1):
+            self._print_trade_details(i, trade)
+    
+    def _print_trade_details(self, trade_num: int, trade: Trade):
+        """Print details for a single trade"""
+        duration = trade.end_time - trade.start_time
+        duration_days = duration.total_seconds() / (24 * 3600)
+        
+        completion_status = "🛑 STOP-LOSS" if trade.stop_loss_triggered else "✓ TAKE-PROFIT"
+        profit_color = "📈" if trade.profit_loss > 0 else "📉"
+        
+        print(f"\n{'─'*70}")
+        print(f"Trade #{trade_num} - {completion_status}")
+        print(f"{'─'*70}")
+        print(f"Period:             {trade.start_time} → {trade.end_time}")
+        print(f"Duration:           {duration_days:.2f} days")
+        print(f"Anchor Price:       ${trade.anchor_price:,.2f}")
+        print(f"Deepest Level:      DCA-{trade.deepest_level} (${trade.deepest_price:,.2f})")
+        print(f"DCA Levels Filled:  {trade.dca_levels_filled}")
+        print(f"Total Invested:     ${trade.total_invested:,.2f}")
+        print(f"Exit Price:         ${trade.exit_price:,.2f}")
+        print(f"Result:             {profit_color} ${trade.profit_loss:,.2f} ({trade.profit_percent:+.2f}%)")
+        
+        if trade.stop_loss_triggered:
+            print(f"Stop-Loss Price:    ${trade.stop_loss_price:,.2f}")
+            print(f"SL Loss Amount:     -${trade.stop_loss_loss:,.2f}")
 
 
 def load_and_prepare_data(csv_file: str) -> pd.DataFrame:

@@ -61,6 +61,15 @@ class StrategyConfig:
         # Validate take profit
         if self.config['take_profit_percent'] <= 0:
             raise ValueError("Take profit percent must be positive")
+        
+        # Validate stop loss (NEW)
+        stop_loss = self.config.get('stop_loss_percent', 0.0)
+        if stop_loss < 0:
+            raise ValueError("stop_loss_percent must be >= 0 (0 = disabled)")
+        
+        # Optional: warn if stop_loss >= 50% (too aggressive)
+        if stop_loss >= 50:
+            print(f"⚠️  WARNING: stop_loss_percent = {stop_loss}% is very aggressive")
     
     @property
     def csv_file(self) -> str:
@@ -121,6 +130,17 @@ class StrategyConfig:
         """Get take profit percentage"""
         return self.config['take_profit_percent']
     
+    @property
+    def stop_loss_percent(self) -> float:
+        """
+        Get stop-loss percentage.
+        
+        Returns:
+            float: Stop-loss percentage (0 = disabled, >0 = enabled)
+                    E.g., 10 means stop loss at -10% from entry
+        """
+        return self.config.get('stop_loss_percent', 0.0)
+    
     def print_config(self):
         """Print configuration summary"""
         print(f"\n{'='*70}")
@@ -129,6 +149,8 @@ class StrategyConfig:
         print(f"CSV File:           {self.csv_file}")
         print(f"Date Range:         {self.start_date or 'Start'} → {self.end_date or 'End'}")
         print(f"Initial Budget:     ${self.initial_budget:,.2f}")
+        print(f"Stop Loss Percent:  {self.stop_loss_percent}% "
+              f"({'DISABLED' if self.stop_loss_percent == 0 else 'ENABLED'})")
         print(f"DCA Levels:         {self.dca_levels}")
         allocations = self.budget_allocation
         print(f"DCA Allocations:    {[f'${a:,.0f}' for a in allocations]}")

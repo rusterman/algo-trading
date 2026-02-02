@@ -43,6 +43,7 @@ def run_backtest_from_config(config_file="strategy_config.json"):
         budget_per_level=config.budget_allocation,
         dca_levels=config.dca_levels,
         take_profit_percent=config.take_profit_percent,
+        stop_loss_percent=config.stop_loss_percent,
     )
     
     # Run backtest

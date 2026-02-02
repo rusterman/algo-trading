@@ -62,7 +62,8 @@ def plot_backtest_chart(config_file="strategy_config.json"):
         initial_budget=config.initial_budget,
         budget_per_level=config.budget_allocation,
         dca_levels=config.dca_levels,
-        take_profit_percent=config.take_profit_percent
+        take_profit_percent=config.take_profit_percent,
+        stop_loss_percent=config.stop_loss_percent
     )
     
     trades = strategy.run_backtest(df_backtest)
@@ -160,21 +161,25 @@ def plot_backtest_chart(config_file="strategy_config.json"):
                 row=1, col=1
             )
         
-        # Trade exit marker (take profit)
+        # Trade exit marker (take profit or stop loss)
+        exit_marker_color = '#EF5350' if trade.stop_loss_triggered else '#00FF00'
+        exit_marker_symbol = 'x' if trade.stop_loss_triggered else 'triangle-up'
+        exit_label = 'SL' if trade.stop_loss_triggered else 'TP'
+        
         fig.add_trace(
             go.Scatter(
                 x=[trade.end_time],
                 y=[trade.exit_price],
                 mode='markers',
                 marker=dict(
-                    symbol='triangle-up',
+                    symbol=exit_marker_symbol,
                     size=12,
-                    color='lime',
+                    color=exit_marker_color,
                     line=dict(color='white', width=2)
                 ),
-                name=f'Trade {i} Exit',
+                name=f'Trade {i} {exit_label}',
                 showlegend=True,
-                hovertemplate=f'<b>Trade {i} Exit</b><br>' +
+                hovertemplate=f'<b>Trade {i} {exit_label}</b><br>' +
                              f'Exit: ${trade.exit_price:,.2f}<br>' +
                              f'P&L: ${trade.profit_loss:,.2f} ({trade.profit_percent:.2f}%)<br>' +
                              f'Time: {trade.end_time.strftime("%Y-%m-%d %H:%M")}<extra></extra>'
