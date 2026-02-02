@@ -269,6 +269,15 @@ class ExcelReportGenerator:
         self._add_key_value("Asset", asset_name)
         self._add_key_value("Period Start", self.config.start_date or "Start")
         self._add_key_value("Period End", self.config.end_date or "End")
+        self._add_key_value("Initial Budget ($)", self.config.initial_budget, 'currency')
+        
+        # DCA Allocations breakdown
+        if self.config.budget_allocation:
+            allocations_str = ", ".join([f"${x:,.0f}" for x in self.config.budget_allocation])
+            self._add_key_value("DCA Level Allocations", allocations_str)
+            total_allocated = sum(self.config.budget_allocation)
+            self._add_key_value("Total Allocated ($)", total_allocated, 'currency')
+        
         self._add_key_value("Strategy Type", "Mean Reversion")
         self._add_key_value("Model", "DCA (Spot)")
         dca_levels_str = ", ".join([str(abs(x)) for x in self.config.dca_levels])
