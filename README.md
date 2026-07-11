@@ -6,17 +6,18 @@ levels and a portfolio-level take-profit target, run it against years of
 historical candles, and get back trade-by-trade results, an interactive chart,
 and an investor-style Excel report.
 
-> ⚠️ **Not financial advice.** This is a research/education tool for backtesting
+> ⚠️ This is a research/education tool for backtesting
 > a strategy against historical data. Past performance on historical data does
 > not predict future results. Use at your own risk.
 
 <table>
   <tr>
     <td><img src="docs/images/trading-view.png"  alt="Interactive chart with trade markers"></td>
+    <td><img src="docs/images/pyplot-view.png"  alt="Matplotlib chart view"></td>
   </tr>
   <tr>
+    <td><img src="docs/images/console-run-backtest.png"  alt="Excel report"></td>
     <td><img src="docs/images/excel-report.png"  alt="Excel report"></td>
-    <td><img src="docs/images/pyplot-view.png"  alt="Matplotlib chart view"></td>
   </tr>
 </table>
 
