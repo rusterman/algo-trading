@@ -6,7 +6,12 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
 build/
 develop-eggs/
 dist/
@@ -35,6 +40,14 @@ results/
 
 # OS
 .DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
 
 # Generated reports and charts
 reports/*.xlsx
