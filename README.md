@@ -10,12 +10,22 @@ and an investor-style Excel report.
 > a strategy against historical data. Past performance on historical data does
 > not predict future results. Use at your own risk.
 
+<table>
+  <tr>
+    <td><img src="docs/images/trading-view.png"  alt="Interactive chart with trade markers"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/excel-report.png"  alt="Excel report"></td>
+    <td><img src="docs/images/pyplot-view.png"  alt="Matplotlib chart view"></td>
+  </tr>
+</table>
+
 ## Why DCA-with-a-ladder
 
 Instead of a single dip-buy, the strategy places a series of buy orders at
 increasing discounts from a reference price, with the allocation per level
 configurable (deeper dips can get bigger allocations). Take-profit is
-calculated from the **portfolio-level average entry price** across all filled
+calculated from the __portfolio-level average entry price__ across all filled
 levels — not just the price of the last fill — so the exit price reflects the
 actual blended cost basis. See [docs/ALGORITHM_SPECIFICATION.md](docs/ALGORITHM_SPECIFICATION.md)
 for the full math and worked example.
@@ -23,29 +33,15 @@ for the full math and worked example.
 ## Features
 
 - Configurable DCA ladder: any number of levels, custom discount percentages,
-  custom USD allocation per level
+   custom USD allocation per level
 - Portfolio-level take-profit (not last-entry-price take-profit)
 - Optional stop-loss ([docs/STOP_LOSS.md](docs/STOP_LOSS.md))
 - Deterministic, wick-based execution (uses candle high/low only)
 - Interactive [TradingView Lightweight Charts](https://tradingview.github.io/lightweight-charts/docs)
-  view with trade markers
+   view with trade markers
 - Matplotlib chart view
 - Investor-style Excel report generation
 - Config-driven — tune the strategy via a single JSON file, no code changes needed
-
-## Screenshots
-
-**Backtest results in the console (`run_backtest.py`)**
-![Console backtest output](docs/images/console-run-backtest.png)
-
-**Interactive chart with trade markers**
-![Trading view chart](docs/images/trading-view.png)
-
-**Excel report**
-![Excel report](docs/images/excel-report.png)
-
-**Matplotlib chart view**
-![Pyplot view](docs/images/pyplot-view.png)
 
 ## Install
 
@@ -105,7 +101,7 @@ python generate_excel_report.py
 
 ## Project layout
 
-```
+```sh
 dca_strategy.py          Core strategy + backtest engine
 config_loader.py         Loads and validates strategy_config.json
 run_backtest.py          CLI: run a backtest from config, print results
@@ -123,7 +119,7 @@ This is a research tool, not a production trading system:
 
 - No trading fees or slippage modeled yet (see [Roadmap](#roadmap))
 - Assumes full fills at the exact limit price on wick touch (no partial fills
-  or liquidity constraints)
+   or liquidity constraints)
 - No live exchange execution — historical replay only
 - Single-asset, single-strategy per run — no portfolio-level backtesting
 
@@ -131,7 +127,7 @@ This is a research tool, not a production trading system:
 
 - [ ] Trading fees, slippage, and tax modeling in P&L calculations
 - [ ] Reinforcement learning-based optimization of strategy configs (DCA
-      levels, allocations, TP/SL) instead of manual tuning
+   levels, allocations, TP/SL) instead of manual tuning
 - [ ] Walk-forward / out-of-sample validation to reduce overfitting risk
 - [ ] Multi-asset / multi-strategy backtesting
 
