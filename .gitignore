@@ -54,3 +54,6 @@ reports/*.xlsx
 reports/*.html
 backtest/*.xlsx
 backtest/*.html
+
+# Folders
+docs/
