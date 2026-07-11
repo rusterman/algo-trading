@@ -35,6 +35,9 @@ for the full math and worked example.
 
 ## Screenshots
 
+**Backtest results in the console (`run_backtest.py`)**
+![Console backtest output](docs/images/console-run-backtest.png)
+
 **Interactive chart with trade markers**
 ![Trading view chart](docs/images/trading-view.png)
 
@@ -84,8 +87,11 @@ Edit [strategy_config.json](strategy_config.json):
 ```bash
 source .venv/bin/activate
 
-# Run the backtest and print results
+# Run the backtest and print results (uses strategy_config.json by default)
 python run_backtest.py
+
+# Or point it at a different config file to compare setups side by side
+python run_backtest.py my_other_config.json
 
 # Interactive TradingView-style chart with trade markers
 python trading-view.py
@@ -106,7 +112,7 @@ run_backtest.py          CLI: run a backtest from config, print results
 trading-view.py          Interactive chart with trade markers
 pyplot-view.py           Matplotlib chart view
 generate_excel_report.py Excel report generator
-data/                    Historical OHLCV CSVs used as backtest input
+data/                    Historical BTC OHLCV CSVs (15m/1h/4h/1d) used as backtest input
 docs/                    Algorithm spec and feature docs
 scripts/                 Ad-hoc analysis/verification scripts
 ```

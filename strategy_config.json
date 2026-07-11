@@ -3,7 +3,7 @@
   "start_date": "2022-01-01",
   "end_date": "2023-08-01",
   "initial_budget": 1000,
-  "stop_loss_percent": 5.0,
+  "stop_loss_percent": 0.0,
   "dca_levels": [ -10, -15, -20, -25, -30, -35, -45],
   "dca_allocations": [ 50, 70, 100, 130, 180, 220, 250],
   "take_profit_percent": 5.0

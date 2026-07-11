@@ -167,7 +167,7 @@ if candle.high >= tp_price:
 
 ```json
 {
-  "csv_file": "data/sol_15m_data_2020_to_2025.csv",
+  "csv_file": "data/btc_15m_data_2018_to_2025.csv",
   "start_date": "2023-01-01",
   "end_date": "2024-01-01",
   "initial_budget": 22256,
